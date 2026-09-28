@@ -25,6 +25,7 @@ packages = ["min_agent", "min_agent.tools"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 markers = [
     "live: hits the real LLM API (deselect with -m 'not live')",
 ]
