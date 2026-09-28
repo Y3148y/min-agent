@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "min-agent"
+version = "0.1.0"
+description = "A minimal viable AI agent built from scratch: ReAct loop, tool registry, session isolation, context compaction, three-tier memory."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.40",
+    "python-dotenv>=1.0",
+    "jsonschema>=4.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+min-agent = "min_agent.__main__:main"
+
+[tool.setuptools]
+packages = ["min_agent", "min_agent.tools"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "live: hits the real LLM API (deselect with -m 'not live')",
+]
+filterwarnings = ["ignore::DeprecationWarning"]
