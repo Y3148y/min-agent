@@ -1,0 +1,4 @@
+# Normalise line endings: repo keeps LF, working trees may use CRLF.
+* text=auto eol=lf
+*.png binary
+*.jsonl text eol=lf
