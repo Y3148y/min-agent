@@ -20,8 +20,8 @@ from typing import Any
 
 from .config import Config
 from .context import LLMCompactor, build_system_prompt, compact_messages
-from .errors import AgentAborted, LLMContextOverflow, LLMError
-from .llm import LLMRequest, estimate_message_tokens, estimate_tokens
+from .errors import AgentAborted, LLMContextOverflow, LLMError, LLMTransportError
+from .llm import LLMRequest, LLMResponse, estimate_message_tokens, estimate_tokens
 from .memory import MemoryStore, extract_facts
 from .parser import parse_response
 from .session import Session
@@ -186,7 +186,7 @@ class Agent:
 
         for attempt in (1, 2):
             try:
-                response = self.llm.complete(request)
+                response = self._complete_or_stream(request)
                 break
             except LLMContextOverflow:
                 if attempt == 2:
@@ -212,6 +212,30 @@ class Agent:
         for reasoning in parsed.reasoning:
             self.trace.emit("reasoning", text=reasoning)
         return parsed
+
+    # ------------------------------------------------------------------ #
+    # streaming bridge
+    # ------------------------------------------------------------------ #
+    def _complete_or_stream(self, request: LLMRequest) -> LLMResponse:
+        """Blocking ``complete`` when the client has no ``stream`` surface.
+
+        With streaming, forward ``text`` deltas to the tracer live (the guarded
+        ``agent`` line grows in place) and assemble the final response from the
+        terminating ``done`` event -- so every consumer downstream still sees
+        the same :class:`LLMResponse` shape.
+        """
+        stream = getattr(self.llm, "stream", None)
+        if stream is None:
+            return self.llm.complete(request)
+        response: LLMResponse | None = None
+        for ev in stream(request):
+            if ev.kind == "text":
+                self.trace.stream("text", ev.delta)
+            elif ev.kind == "done":
+                response = ev.response
+        if response is None:
+            raise LLMTransportError("response stream ended without a final message")
+        return response
 
     # ------------------------------------------------------------------ #
     # Step 3: run tools, feed results back

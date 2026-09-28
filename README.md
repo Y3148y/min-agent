@@ -92,12 +92,18 @@ min_agent/
 ## 数据分布
 
 - `.sessions/<user>/<id>/` 每个窗口一目录（对话、摘要、待办）
-- `.traces/` 每次运行全量痕迹
+- `.traces/` 每次运行全量痕迹（JSONL 整块快照）
 - `.memory/<user>/facts.json` 长期记忆
 - 均被 `.gitignore` 排除
+
+## 输出与流式
+
+- REPL 下 LLM 回复**流式输出**：`agent` 一行随 token 增量增长（thinking 与工具调用整块展示）
+- `.traces/*.jsonl` 是不变的事件快照（每次含完整文本），不受流式影响
+- `--demo` 模式不渲染过程流，只打印 `you>/ai>` 问答
 
 ## 目录说明
 
 - `docs/agent-handbook.md` 使用手册、`docs/architecture.md` 系统设计
 - `PROMPT_LOG.md` AI 提示词与问题解决过程记录（含关键探针）
-- `tests/` 91 项离线 + 5 项 live
+- `tests/` 99 项离线 + 6 项 live

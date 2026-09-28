@@ -69,6 +69,8 @@ class Tracer:
         self._seq = 0
         self._fh: TextIO | None = None
         self.path: Path | None = None
+        self._live_agent = False
+        self._live_buf = ""
 
         if traces_root is not None:
             traces_root.mkdir(parents=True, exist_ok=True)
@@ -89,6 +91,32 @@ class Tracer:
             if self.console:
                 self._render(ev)
         return ev
+
+    # -- live streaming of the final line ----------------------------------
+    def stream(self, kind: str, delta: str) -> None:
+        """Incrementally render ``keven`` text onto a single guarded line.
+
+        Complete lines end with a newline; the trailing partial line is
+        rewritten in place with ``\\r`` so the console shows the token stream
+        growing. The ``final`` event closes the line and starts the next one.
+        """
+        if not self.console or kind != "text" or not delta:
+            return
+        s = self._stream
+        if not self._live_agent:
+            s.write(f"\n{BOLD}agent{RESET} ")
+            self._live_agent = True
+        buf = self._live_buf + delta
+        self._live_buf = ""
+        lines = buf.split("\n")
+        for line in lines[:-1]:
+            if line:
+                s.write(f"\r{BOLD}agent{RESET} {line}")
+            s.write("\n")
+        self._live_buf = lines[-1]
+        if self._live_buf:
+            s.write(f"\r{BOLD}agent{RESET} {self._live_buf}")
+        s.flush()
 
     # -- console renderers --------------------------------------------------
     def _render(self, ev: TraceEvent) -> None:
@@ -137,7 +165,18 @@ class Tracer:
         elif ev.kind == "warning":
             s.write(f"{YELLOW}[warn] {RESET}{d.get('message')}\n")
         elif ev.kind == "final":
-            s.write(f"\n{BOLD}agent{RESET} {d.get('text')}\n\n")
+            text = d.get("text") or ""
+            if self._live_agent:
+                # The answer was already streamed token-by-token; just close
+                # the line and reset for the next turn.
+                if self._live_buf:
+                    self._stream.write("\n")
+                self._stream.write("\n")
+                self._live_agent = False
+                self._live_buf = ""
+            else:
+                self._stream.write(f"\n{BOLD}agent{RESET} {text}\n\n")
+            self._stream.flush()
         s.flush()
 
     # -- lifecycle ----------------------------------------------------------

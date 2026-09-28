@@ -124,7 +124,6 @@ def _repl(agent) -> None:
             _print(f"  summary: {agent.session.meta.summary or '(none yet)'}")
             continue
         result = agent.run_turn(line)
-        _print("ai>  ", result.text or "(no reply)")
         if result.error:
             _print(f"[min-agent] warning: {result.error}")
 

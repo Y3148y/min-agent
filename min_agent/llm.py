@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Protocol
 
@@ -49,6 +50,21 @@ class LLMRequest:
     tools: list[dict[str, Any]] = field(default_factory=list)
     max_tokens: int = 4096
     temperature: float = 0.2
+
+
+@dataclass
+class StreamEvent:
+    """One live chunk of a streaming response.
+
+    ``kind`` is ``"text"``/``"thinking"`` for incremental deltas and ``"done"``
+    for the final complete message.  The loop renders the deltas onto the
+    console as they arrive and assembles the ``LLMResponse`` from the ``done``
+    event, so downstream code sees exactly what the blocking path produced.
+    """
+
+    kind: str
+    delta: str = ""
+    response: "LLMResponse | None" = None
 
 
 class LLMClient(Protocol):
@@ -104,6 +120,67 @@ class AnthropicLLM:
             input_tokens=getattr(usage, "input_tokens", 0) if usage else 0,
             output_tokens=getattr(usage, "output_tokens", 0) if usage else 0,
             raw=response,
+        )
+
+    def stream(self, request: LLMRequest) -> Iterator[StreamEvent]:
+        """Like :meth:`complete`, but yields incremental ``text``/``thinking``
+        deltas as they arrive and finishes with a ``done`` event carrying the
+        assembled :class:`LLMResponse`.
+
+        Retry policy lives in the connect phase only: ``messages.stream``
+        returns a manager without any network I/O, so we retry ``__enter__``
+        (which opens the connection) and let a mid-stream failure abort the
+        turn instead of re-winding already-rendered lines.
+        """
+        started = time.perf_counter()
+        manager = call_with_retry(
+            lambda: self.client.messages.stream(
+                model=self.config.model,
+                max_tokens=request.max_tokens,
+                system=request.system or None,
+                messages=request.messages,
+                tools=request.tools or None,
+            ),
+            attempts=self.config.max_retries,
+            base=self.config.retry_base_delay,
+            cap=self.config.retry_max_delay,
+        )
+        stream = call_with_retry(
+            lambda: manager.__enter__(),
+            attempts=self.config.max_retries,
+            base=self.config.retry_base_delay,
+            cap=self.config.retry_max_delay,
+        )
+        try:
+            for ev in stream:
+                # Dispatch on the event's own `type` field instead of importing
+                # the (private, version-fragile) event classes: parsed events
+                # carry ``type == "text"/"thinking"`` while raw deltas use
+                # ``*_delta`` / ``content_block_*`` -- no collisions.
+                ev_type = getattr(ev, "type", "")
+                if ev_type == "text":
+                    yield StreamEvent("text", delta=getattr(ev, "text", ""))
+                elif ev_type == "thinking":
+                    yield StreamEvent("thinking", delta=getattr(ev, "thinking", ""))
+            final = stream.get_final_message()
+        finally:
+            try:
+                manager.__exit__(None, None, None)
+            finally:
+                self._last_latency_ms = int((time.perf_counter() - started) * 1000)
+
+        blocks = [_block_to_dict(b) for b in final.content]
+        usage = getattr(final, "usage", None)
+        yield StreamEvent(
+            "done",
+            response=LLMResponse(
+                content=blocks,
+                stop_reason=getattr(final, "stop_reason", "") or "",
+                model=getattr(final, "model", self.config.model),
+                input_tokens=getattr(usage, "input_tokens", 0) if usage else 0,
+                output_tokens=getattr(usage, "output_tokens", 0) if usage else 0,
+                raw=final,
+            ),
         )
 
 

@@ -6,13 +6,13 @@
 min_agent/
   config.py    中心配置：所有可调参数，从 .env 解析一次，测试可覆盖
   errors.py    错误层级 + 重试（full jitter）
-  llm.py       大模型客户端（Anthropic 兼容协议），两种估算 token 的启发式
+  llm.py       大模型客户端（Anthropic 兼容协议）：阻塞 complete + 流式 stream，估算 token 的启发式
   parser.py    把 LLM 输出拆成 think / text / tool_use；未按格式返回时做文本兜底
   context.py   系统提示词拼装 + 上下文压缩
   session.py   一个窗口的状态与落盘（transcript.jsonl / meta / summary / todo）
   store.py     会话目录的打开与枚举
   memory.py    三层记忆（工作/情景/语义），门控写入 + 关键词召回
-  trace.py     运行痕迹：JSONL + ANSI 控制台渲染
+  trace.py     运行痕迹：JSONL 整块快照 + ANSI 控制台渲染（含流式增量行）
   loop.py      第 1~4 步循环：Agent.run_turn
   tools/       工具注册、schema 推导、分发、超时
   __main__.py  命令行入口
