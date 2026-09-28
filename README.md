@@ -85,7 +85,7 @@ min_agent/
 |---|---|
 | `calculator` | AST 白名单四则运算（无 eval） |
 | `search` | 模拟搜索（本地语料 BM25 词法打分） |
-| `weather` | 模拟天气（按城市确定的假数据） |
+| `weather` | 天气查询。默认 mock（确定性假数据）；`WEATHER_BACKEND=wttr.in` 走真实 wttr.in（免 key），不可达时自动回退 mock |
 | `todo` | 窗口内待办 add/list/done/remove/clear |
 | `read_docs` | 读取 `docs/` 项目文档（list/search/read/section） |
 

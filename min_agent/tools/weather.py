@@ -1,19 +1,24 @@
-﻿"""``weather`` -- mocked forecast.
+﻿"""``weather`` tool with two backends.
 
-Deterministic on purpose: same city + same day always yields the same numbers,
-so a test can assert on the agent's reasoning about the result, and a demo
-replays identically on both windows.
+* ``mock`` (default)  -- deterministic fake forecast.  Same city + same day
+  always yields the same numbers, so tests can assert on the agent's reasoning,
+  and no key or network is needed.
+* ``wttr.in``         -- a real (and free, key-less) forecast service.  If it is
+  unreachable or returns garbage, the tool quietly falls back to the mock so the
+  loop never crashes over a side tool.
 """
 
 from __future__ import annotations
 
 import hashlib
+import urllib.parse
+from dataclasses import dataclass
 from datetime import date as Date
 from datetime import timedelta
 from typing import Annotated
 
 from ..errors import ToolError
-from .base import tool
+from .base import ToolSpec, tool
 
 # Rough climate normals, (Jan..Dec) mean high / mean low in Celsius. Enough for
 # the model to reason about seasonality, which is all this tool is for.
@@ -74,25 +79,97 @@ def _forecast(city: str, day: Date) -> dict[str, object]:
     }
 
 
+def _mock_row(city: str, day: Date) -> dict[str, object]:
+    """Deterministic fake forecast for (city, day), explicitly labelled."""
+    return _forecast(city, day)
+
+
+def _parse_day(city: str, date: str) -> Date:
+    if not city.strip():
+        raise ToolError("City is required")
+    if date:
+        try:
+            return Date.fromisoformat(date)  # noqa: A001 - `date` is the tool argument
+        except ValueError as exc:
+            raise ToolError(
+                f"Bad date {date!r}",
+                hint="Use YYYY-MM-DD, e.g. 2026-04-01.",
+            ) from exc
+    return Date.today()
+
+
+def fetch_wttr_in(city: str, day: Date, timeout: float = 6.0) -> dict[str, object]:
+    """Fetch one day's forecast from wttr.in (no key needed) and normalise it
+    into the same shape the mock produces."""
+    import httpx
+
+    url = f"https://wttr.in/{urllib.parse.quote(city.strip())}?format=j1&lang=zh"
+    response = httpx.get(url, timeout=timeout, follow_redirects=True)
+    response.raise_for_status()
+    data = response.json()
+    days = data.get("weather", []) or []
+    entry = next((d for d in days if d.get("date") == day.isoformat()), days[0] if days else None)
+    if entry is None:
+        raise RuntimeError(f"wttr.in returned no forecast for {city!r}")
+    current = (data.get("current_condition") or [{}])[0]
+    hourly0 = (entry.get("hourly") or [{}])[0]
+    desc = (
+        (hourly0.get("weatherDesc") or [{}])[0].get("value")
+        or (current.get("weatherDesc") or [{}])[0].get("value")
+        or "unknown"
+    )
+    return {
+        "city": city.strip(),
+        "date": entry.get("date") or day.isoformat(),
+        "temp_high_c": float(entry.get("maxtempC", 0)),
+        "temp_low_c": float(entry.get("mintempC", 0)),
+        "temp_high_f": float(entry.get("maxtempF", 0)),
+        "temp_low_f": float(entry.get("mintempF", 0)),
+        "condition": desc,
+        "humidity_pct": int(entry.get("avghumidity") or current.get("humidity") or 0),
+        "wind_kph": float(entry.get("maxwindspeedKmph") or current.get("windspeedKmph") or 0),
+        "source": "wttr.in",
+    }
+
+
+def _weather_impl(backend: str, timeout: float):
+    def impl(city: str, date: str = "") -> str:
+        day = _parse_day(city, date)
+        if backend == "wttr.in":
+            try:
+                return _fmt(fetch_wttr_in(city, day, timeout=timeout))
+            except Exception:  # noqa: BLE001 - forecast is a side tool; never take the session down
+                row = _mock_row(city, day)
+                row["source"] = "mock-forecast fallback (wttr.in unreachable)"
+                return _fmt(row)
+        return _fmt(_mock_row(city, day))
+
+    return impl
+
+
+def make_weather_tool(backend: str = "mock", *, timeout: float = 6.0) -> ToolSpec:
+    """A :class:`ToolSpec` that honours the configured backend.
+
+    Reuses the module-level ``weather`` spec's schema and description, so the
+    model sees exactly the same tool regardless of backend.
+    """
+    return ToolSpec(
+        name=weather.name,
+        description=weather.description,
+        input_schema=weather.input_schema,
+        fn=_weather_impl(backend, timeout),
+        tags=weather.tags,
+    )
+
+
 @tool(tags=("knowledge",))
 def weather(
     city: Annotated[str, "city name, e.g. 'Shanghai' or 'Berlin'"],
     date: Annotated[str, "YYYY-MM-DD; defaults to today"] = "",
 ) -> str:
     """Get the current or forecast weather for a city. Use this whenever the user asks about weather, temperature or whether to carry an umbrella."""
-    if not city.strip():
-        raise ToolError("City is required")
-    if date:
-        try:
-            day = Date.fromisoformat(date)  # noqa: A001 - `date` is the tool argument
-        except ValueError as exc:
-            raise ToolError(
-                f"Bad date {date!r}",
-                hint="Use YYYY-MM-DD, e.g. 2026-04-01.",
-            ) from exc
-    else:
-        day = Date.today()
-    return _fmt(_forecast(city, day))
+    day = _parse_day(city, date)
+    return _fmt(_mock_row(city, day))
 
 
 def forecast_range(city: str, start: Date, days: int) -> str:
@@ -110,9 +187,8 @@ def forecast_range(city: str, start: Date, days: int) -> str:
 
 def _fmt(f: dict[str, object]) -> str:
     return (
-        f"Weather for {f['city']} on {f['date']} (mocked):\n"
+        f"Weather for {f['city']} on {f['date']} (source: {f['source']}):\n"
         f"  {f['condition']}, {f['temp_low_c']}C to {f['temp_high_c']}C "
         f"({f['temp_low_f']}F to {f['temp_high_f']}F)\n"
-        f"  humidity {f['humidity_pct']}%, wind {f['wind_kph']} kph\n"
-        f"  source: {f['source']}"
+        f"  humidity {f['humidity_pct']}%, wind {f['wind_kph']} kph"
     )

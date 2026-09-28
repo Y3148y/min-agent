@@ -19,7 +19,7 @@ from .read_docs import build_read_docs_tool
 from .registry import ToolRegistry
 from .search import search
 from .todo import TodoStore, build_todo_tool, make_todo_tool
-from .weather import weather
+from .weather import make_weather_tool, weather
 
 __all__ = [
     "ToolCall",
@@ -35,6 +35,7 @@ __all__ = [
     "calculator",
     "search",
     "weather",
+    "make_weather_tool",
 ]
 
 
@@ -91,7 +92,7 @@ def build_registry(ctx: ToolContext, memory: Any = None) -> tuple[ToolRegistry, 
 
     specs: list[ToolSpec] = [
         calculator,
-        weather,
+        make_weather_tool(ctx.config.weather_backend),  # mock (default) or wttr.in
         search,
         build_read_docs_tool(ctx.config.docs_dir),
         todo_spec,

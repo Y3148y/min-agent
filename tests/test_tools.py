@@ -187,6 +187,73 @@ class TestWeather:
         assert reg.call("weather", {"city": "x", "date": "14/05/2026"})["ok"] is False
 
 
+class TestWeatherBackends:
+    def test_default_is_mock(self, tmp_path):
+        from min_agent.config import Config
+        from min_agent.tools import ToolContext
+
+        cfg = Config(workspace=tmp_path)
+        spec = __import__("min_agent.tools", fromlist=["make_weather_tool"]).make_weather_tool(
+            cfg.weather_backend
+        )
+        res = ToolRegistry([spec]).call("weather", {"city": "Shanghai"})
+        assert res["ok"] is True
+        assert "mock-forecast" in res["result"]
+
+    def test_wttr_in_parses_response(self, monkeypatch, tmp_path):
+        import importlib
+
+        wmod = importlib.import_module("min_agent.tools.weather")
+
+        fake = {
+            "weather": [
+                {
+                    "date": "2026-06-15",
+                    "maxtempC": "31",
+                    "mintempC": "24",
+                    "maxtempF": "88",
+                    "mintempF": "75",
+                    "avghumidity": 78,
+                    "maxwindspeedKmph": "19",
+                    "hourly": [{"weatherDesc": [{"value": "多云"}]}],
+                }
+            ],
+            "current_condition": [{"humidity": "80", "windspeedKmph": "12", "weatherDesc": [{"value": "多云"}]}],
+        }
+
+        class _FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return fake
+
+        def _fake_get(url, timeout=None, follow_redirects=None):
+            assert "wttr.in" in url
+            return _FakeResponse()
+
+        monkeypatch.setattr("httpx.get", _fake_get)
+        row = wmod.fetch_wttr_in("Shanghai", __import__("datetime").date(2026, 6, 15))
+        assert row["temp_high_c"] == 31.0
+        assert row["condition"] == "多云"
+        assert row["source"] == "wttr.in"
+
+    def test_wttr_in_falls_back_when_unreachable(self, monkeypatch, tmp_path):
+        from min_agent.config import Config
+
+        def _boom(url, timeout=None, follow_redirects=None):
+            raise ConnectionError("simulated offline")
+
+        monkeypatch.setattr("httpx.get", _boom)
+        spec = __import__("min_agent.tools", fromlist=["make_weather_tool"]).make_weather_tool(
+            "wttr.in", timeout=0.5
+        )
+        res = ToolRegistry([spec]).call("weather", {"city": "Shanghai"})
+        assert res["ok"] is True
+        assert "fallback" in res["result"]
+        assert "mock-forecast" in res["result"]
+
+
 # --------------------------------------------------------------------------- #
 # search (mock but ranked)
 # --------------------------------------------------------------------------- #

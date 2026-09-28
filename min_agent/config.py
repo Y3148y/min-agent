@@ -58,6 +58,9 @@ class Config:
     # --- tools ---
     tool_timeout: float = 10.0
     max_tool_result_chars: int = 2000
+    # "mock"    deterministic fake forecast (default, fully offline)
+    # "wttr.in" real forecast from https://wttr.in (no API key), mock fallback if unreachable
+    weather_backend: str = "mock"
 
     # --- context management ---
     context_budget: int = 24_000
@@ -113,6 +116,7 @@ def load_config(**overrides) -> Config:
         max_repeat_call=_env_int("MAX_REPEAT_CALL", 3),
         tool_timeout=float(_env_int("TOOL_TIMEOUT", 10)),
         max_tool_result_chars=_env_int("MAX_TOOL_RESULT_CHARS", 2000),
+        weather_backend=_env_str("WEATHER_BACKEND", "mock"),
         context_budget=_env_int("CONTEXT_BUDGET", 24_000),
         keep_recent_messages=_env_int("KEEP_RECENT_MESSAGES", 6),
         summary_max_chars=_env_int("SUMMARY_MAX_CHARS", 800),

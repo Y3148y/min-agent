@@ -28,7 +28,7 @@ min-agent --user alice tools              # 列出模型可用的工具
 
 - `calculator` 四则运算（安全 AST 解析）
 - `search` 模拟网络搜索（本地小型语料 BM25 词法打分）
-- `weather` 模拟天气查询（按城市名做确定性假数据）
+- `weather` 天气查询。默认 `mock`（确定性假数据，无需联网）；在 `.env` 里设 `WEATHER_BACKEND=wttr.in` 即可切到真实 wttr.in 预报（免费、无 key），服务不可达时自动回退 mock
 - `todo` 本窗口的待办清单，支持 add/list/done/remove/clear
 - `read_docs` 读取 `docs/` 下的项目文档
 
