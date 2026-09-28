@@ -21,22 +21,28 @@ def _print(*parts, **kw):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="min-agent",
-        description="A minimal agent: ReAct loop, tools, sessions, memory, traces.",
-    )
-    parser.add_argument("--user", default="local", help="which user's windows to use")
-    parser.add_argument(
+    # --user / --session belong to both the main command and every
+    # subcommand, so argparse will accept them *before or after* the
+    # subcommand word (e.g. `min-agent --user alice trace --session w`).
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--user", default="local", help="which user's windows to use")
+    common.add_argument(
         "--session",
         default="main",
         help="window (session) id; each is an independent conversation",
     )
+
+    parser = argparse.ArgumentParser(
+        prog="min-agent",
+        parents=[common],
+        description="A minimal agent: ReAct loop, tools, sessions, memory, traces.",
+    )
     parser.add_argument("--demo", action="store_true", help="run the built-in demo script")
     parser.add_argument("--env", default=".env", help="path to the .env file")
     sub = parser.add_subparsers(dest="command")
-    sub.add_parser("sessions", help="list this user's windows")
-    sub.add_parser("trace", help="Pretty-print a window's JSONL trace")
-    sub.add_parser("tools", help="list the tools available to the model")
+    sub.add_parser("sessions", parents=[common], help="list this user's windows")
+    sub.add_parser("trace", parents=[common], help="Pretty-print a window's JSONL trace")
+    sub.add_parser("tools", parents=[common], help="list the tools available to the model")
     return parser
 
 
@@ -56,7 +62,12 @@ def main(argv: list[str] | None = None) -> int:
     from .trace import Tracer
 
     opened = store.open(args.user, args.session, create=True)
-    trace = Tracer(args.session, console=not args.demo)
+    trace = Tracer(
+        args.session,
+        traces_root=config.traces_root,
+        prefix=f"{args.user}.",
+        console=not args.demo,
+    )
     agent = Agent(config=config, user=args.user, session_id=args.session, session=opened, trace=trace)
     _print(f"[min-agent] window {args.session!r} for user {args.user!r} is open.")
     _print(f"[min-agent] tools: {', '.join(sorted(agent.registry.names()))}")

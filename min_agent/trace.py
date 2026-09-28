@@ -57,6 +57,7 @@ class Tracer:
         session_id: str,
         *,
         traces_root: Path | None = None,
+        prefix: str = "",
         console: bool = True,
         stream: TextIO | None = None,
     ):
@@ -71,8 +72,7 @@ class Tracer:
 
         if traces_root is not None:
             traces_root.mkdir(parents=True, exist_ok=True)
-            stamp = time.strftime("%Y%m%d-%H%M%S")
-            self.path = traces_root / f"{session_id}-{stamp}.jsonl"
+            self.path = traces_root / f"{prefix}{session_id}.jsonl"
             self._fh = self.path.open("a", encoding="utf-8")
 
     # -- emit ---------------------------------------------------------------
