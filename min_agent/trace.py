@@ -97,9 +97,11 @@ class Tracer:
         if ev.kind == "user":
             s.write(f"{CYAN}you{RESET} {d.get('text', '')}\n")
         elif ev.kind == "llm_request":
+            tools = d.get("tools", 0)
+            tools = len(tools) if isinstance(tools, (list, tuple)) else tools
             s.write(
                 f"{DIM}-> llm  turn={d.get('turn')} msgs={d.get('messages')} "
-                f"~{d.get('est_tokens')}tok tools={len(d.get('tools', []))}{RESET}\n"
+                f"~{d.get('est_tokens')}tok tools={tools}{RESET}\n"
             )
         elif ev.kind == "llm_response":
             s.write(
