@@ -123,20 +123,18 @@ def test_console_streams_one_growing_line_and_closes_once():
         turn=1,
     )
     out = buf.getvalue()
-    # the live line opens once with the `agent` label and grows via \r...
-    assert "agent 你" in out
-    assert "agent 你好" in out
-    assert "agent 你好世界" in out
-    # ...complete lines close with a newline and rewrite from column 0
-    assert "agent 你好世界\n" in out
-    assert "第二行\n" in out
-    # the final event does NOT reprint the whole answer (close only adds a
-    # trailing newline to the pending partial + a blank separator)
-    assert out.count("你好世界") == 1
-    assert out.count("第二行") == 1
-    # next turn opens a fresh line
+    # pure-append mode: one `agent` prefix, deltas concatenated verbatim,
+    # newlines flow through untouched, and the final event only adds a blank
+    # separator instead of re-printing the whole answer.
+    assert out == "\nagent 你好世界\n第二行\n\n"
+    assert "agent " in out and out.count("agent ") == 1
+    assert "\r" not in out
+    # next turn opens a fresh line with its own prefix
     tracer.stream("text", "A")
-    assert "agent A" in buf.getvalue()
+    out2 = buf.getvalue()
+    assert out2.startswith("\nagent 你好世界")
+    assert out2.endswith("\nagent A")
+    assert out2.count("agent ") == 2
 
 
 def test_stream_ignored_when_console_off(cfg):
