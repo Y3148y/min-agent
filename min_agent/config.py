@@ -42,7 +42,7 @@ class Config:
     """Runtime configuration for one agent process."""
 
     # --- LLM ---
-    model: str = "qwen3.7-flash-2026-07-15"
+    model: str = "qwen3.8-flash"
     api_key: str = ""
     base_url: str | None = None
     max_tokens: int = 4096
@@ -109,7 +109,7 @@ def load_config(**overrides) -> Config:
     load_dotenv(REPO_ROOT / ".env", override=True)
 
     defaults = Config(
-        model=_env_str("MODEL_ID", "qwen3.7-flash-2026-07-15"),
+        model=_env_str("MODEL_ID", "qwen3.8-flash"),
         api_key=_env_str("ANTHROPIC_API_KEY", ""),
         base_url=os.getenv("ANTHROPIC_BASE_URL") or None,
         max_turns=_env_int("MAX_TURNS", 12),
