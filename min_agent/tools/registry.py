@@ -159,19 +159,27 @@ class ToolRegistry:
     def _invoke(fn: Callable[..., Any], args: dict[str, Any], timeout: float | None) -> Any:
         if timeout is None:
             return fn(**args)
-        # Threads cannot be killed, so this is a soft budget: the tool keeps
-        # running in the background but the loop is never blocked.  Good enough
-        # for a minimal agent, and honest about it.
+        # A Python thread cannot be killed, so this budget bounds *our waiting*,
+        # not the tool's execution.  `shutdown(wait=False, cancel_futures=True)`
+        # is load-bearing: raising from inside a `with ThreadPoolExecutor(...)`
+        # block makes `__exit__` run `shutdown(wait=True)`, which joins the
+        # runaway worker -- so a hung tool used to block the agent loop for
+        # exactly as long as it cared to.  The orphan keeps running until it
+        # returns on its own, and a hard kill would need a process pool.
         from concurrent.futures import ThreadPoolExecutor, TimeoutError as FTimeout
 
-        with ThreadPoolExecutor(max_workers=1) as pool:
+        pool = ThreadPoolExecutor(max_workers=1)
+        try:
             future = pool.submit(_call_without_context_exit, fn, args)
             try:
                 return future.result(timeout=timeout)
             except FTimeout as exc:
+                future.cancel()
                 raise ToolTimeoutError(
                     f"{fn.__name__} exceeded its {timeout:g}s budget"
                 ) from exc
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
 
     # -- helpers for prompts / tests ---------------------------------------
     def catalog_names(self) -> list[str]:

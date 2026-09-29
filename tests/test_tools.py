@@ -118,6 +118,45 @@ def test_tool_call_signature_is_stable():
     assert a.signature() != c.signature()
 
 
+def test_timeout_bounds_wait_not_just_the_raised_error():
+    """A hung tool must stop blocking the loop at the budget, not at its own pace.
+
+    Regression: `_invoke` used to `raise` from inside the `with
+    ThreadPoolExecutor(...)` block, so `__exit__` ran `shutdown(wait=True)` and
+    joined the runaway worker.  The timeout only decided *when the error was
+    raised*; the caller still waited for the tool to finish.
+    """
+    import time
+
+    @tool
+    def hang(seconds: Annotated[int, "how long to sleep"] = 5) -> str:
+        """Sleep for a while and then give up."""
+        time.sleep(seconds)
+        return "eventually"
+
+    reg = ToolRegistry([hang])
+    started = time.perf_counter()
+    res = reg.call("hang", {"seconds": 5}, timeout=0.1)
+    elapsed = time.perf_counter() - started
+
+    assert res["ok"] is False
+    assert "exceeded" in res["error"]
+    assert elapsed < 1.0, f"call() waited {elapsed:.2f}s on a 0.1s budget"
+
+
+def test_timeout_leaves_a_fast_tool_untouched():
+    import time
+
+    @tool
+    def quick() -> str:
+        """Return immediately."""
+        time.sleep(0.01)
+        return "fast"
+    res = ToolRegistry([quick]).call("quick", {}, timeout=2.0)
+    assert res["ok"] is True
+    assert res["result"] == "fast"
+
+
 # --------------------------------------------------------------------------- #
 # calculator
 # --------------------------------------------------------------------------- #
