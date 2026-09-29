@@ -16,6 +16,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, TextIO
 
+from .paths import ensure_within, safe_segment
+
 # --------------------------------------------------------------------------- #
 # ANSI helpers (disabled when not a TTY or NO_COLOR is set)
 # --------------------------------------------------------------------------- #
@@ -73,7 +75,16 @@ class Tracer:
 
         if traces_root is not None:
             traces_root.mkdir(parents=True, exist_ok=True)
-            self.path = traces_root / f"{prefix}{session_id}.jsonl"
+            # Both halves of the file name are user-controlled, and this used to
+            # interpolate them raw: `--user ../..` produced the path
+            # `.traces/../../.main.jsonl` and happily wrote outside the
+            # workspace, while the session store next to it sanitised all along.
+            # Strip the separator off ``prefix``, sanitise the two halves on
+            # their own, then put the dot back so the on-disk name stays
+            # "<user>.<session>.jsonl" and existing traces keep resolving.
+            stem = safe_segment(prefix.rstrip(".")) if prefix else ""
+            name = f"{stem}.{safe_segment(session_id)}" if stem else safe_segment(session_id)
+            self.path = ensure_within(traces_root, traces_root / f"{name}.jsonl")
             self._fh = self.path.open("a", encoding="utf-8")
 
     # -- emit ---------------------------------------------------------------

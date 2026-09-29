@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from .paths import safe_segment
 from .session import Session
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -21,7 +22,7 @@ class SessionStore:
 
     # -- paths --------------------------------------------------------------
     def node_dir(self, user: str, session_id: str) -> Path:
-        return self.root / _safe(user) / _safe(session_id)
+        return self.root / safe_segment(user) / safe_segment(session_id)
 
     # -- operations ---------------------------------------------------------
     def open(self, user: str, session_id: str, *, create: bool = True) -> Session:
@@ -39,7 +40,7 @@ class SessionStore:
     def list_sessions(self, user: str) -> list[dict]:
         """All sessions for ``user``, newest first."""
         rows: list[dict] = []
-        user_dir = self.root / _safe(user)
+        user_dir = self.root / safe_segment(user)
         if not user_dir.exists():
             return rows
         for node in sorted(user_dir.iterdir()):
@@ -56,8 +57,3 @@ class SessionStore:
             rows.append(row)
         rows.sort(key=lambda r: r.get("updated_at", 0), reverse=True)
         return rows
-
-
-def _safe(segment: str) -> str:
-    cleaned = "".join(c if c.isalnum() or c in "-_" else "_" for c in segment)
-    return cleaned or "default"
