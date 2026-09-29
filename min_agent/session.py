@@ -77,7 +77,12 @@ class Session:
         # path escape or contain Windows-reserved characters.
         safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in session_id).strip() or "default"
         node_dir.mkdir(parents=True, exist_ok=True)
-        return cls(SessionMeta(id=safe, user=user), node_dir, lock=lock)
+        session = cls(SessionMeta(id=safe, user=user), node_dir, lock=lock)
+        # Persist the meta *now*, not on first append: list_sessions skips any
+        # window without meta.json, so a freshly created but idle window would
+        # silently disappear, and a later load would forge user="default".
+        session._save_meta()
+        return session
 
     @classmethod
     def load(cls, node_dir: Path, *, lock=None) -> "Session":

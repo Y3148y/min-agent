@@ -98,6 +98,32 @@ def test_turn_count_and_tool_calls_tracked(cfg):
     assert s.meta.tool_calls == 1
 
 
+def test_created_window_has_meta_immediately(cfg):
+    """Session.create must persist meta.json before the first append.
+
+    list_sessions (store.py) skips any window without meta.json, so without
+    immediate persistence a freshly created, idle window would silently
+    disappear, and a later load would forge user="default".
+    """
+    from min_agent.paths import safe_segment
+
+    store = SessionStore(cfg.sessions_root)
+    store.open("alice", "idle", create=True).close()
+    meta_path = cfg.sessions_root / safe_segment("alice") / "idle" / "meta.json"
+    assert meta_path.exists()
+    rows = store.list_sessions("alice")
+    assert any(r["dir"] == str(meta_path.parent) for r in rows)
+
+
+def test_created_window_reloads_real_user(cfg):
+    from min_agent.session import Session
+
+    s = Session.create("fresh", "bob", cfg.sessions_root / "bob" / "fresh")
+    s.close()
+    reloaded = Session.load(cfg.sessions_root / "bob" / "fresh")
+    assert reloaded.meta.user == "bob"
+
+
 # --------------------------------------------------------------------------- #
 # repair: transcript must stay a valid alternating sequence
 # --------------------------------------------------------------------------- #
