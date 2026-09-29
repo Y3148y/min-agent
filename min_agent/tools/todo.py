@@ -9,6 +9,7 @@ tool carries per-session state.
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -59,6 +60,23 @@ class TodoStore:
         )
 
     def add(self, text: str) -> TodoItem:
+        """Add a todo, idempotently on the normalised text.
+
+        The model calls tools it decided to call, and it re-calls them: a turn
+        that hit max_tokens mid-answer, a tool that returned is_error, a repeat
+        the loop guard let through.  `add` used to mint `max(id)+1` every time,
+        so every retry silently duplicated the entry.  The old one stays and is
+        returned instead, which makes a retry harmless and keeps the id stable
+        for a `done` that follows it.
+
+        Normalising (whitespace collapsed, casefolded) rather than comparing
+        raw means "买 菜" and "买菜" are one item.  A user who genuinely wants
+        the same text twice can disambiguate in the text itself.
+        """
+        key = _normalise(text)
+        existing = next((i for i in self.items if _normalise(i.text) == key), None)
+        if existing is not None:
+            return existing
         nid = max((i.id for i in self.items), default=0) + 1
         item = TodoItem(id=nid, text=text)
         self.items.append(item)
@@ -171,3 +189,9 @@ def build_todo_tool(store: TodoStore) -> ToolSpec:
 def make_todo_tool(path: Path) -> tuple[ToolSpec, TodoStore]:
     store = TodoStore(path)
     return build_todo_tool(store), store
+
+
+def _normalise(text: str) -> str:
+    """Same key MemoryStore uses for its dedup, so the two agree on what counts
+    as "the same text"."""
+    return re.sub(r"[\s\W_]+", "", text.lower())

@@ -76,10 +76,20 @@ class Agent:
 
             missing = config.missing_llm_config()
             if missing:
+                # missing_llm_config also reports out-of-range limits, and the
+                # "copy .env.example" hint is only true for the first case.
+                named = [m for m in missing if "=" not in m]
+                invalid = [m for m in missing if "=" in m]
+                if named and not invalid:
+                    raise RuntimeError(
+                        "LLM not configured: missing "
+                        + ", ".join(named)
+                        + " (copy .env.example to .env)"
+                    )
                 raise RuntimeError(
-                    "LLM not configured: missing "
-                    + ", ".join(missing)
-                    + " (copy .env.example to .env)"
+                    "invalid configuration: "
+                    + ", ".join(invalid or named)
+                    + " (check .env / environment)"
                 )
             self.llm = AnthropicLLM(config)
 

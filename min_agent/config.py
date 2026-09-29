@@ -8,6 +8,7 @@ single ``Config`` object instead of patching module globals.
 from __future__ import annotations
 
 import os
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -29,7 +30,33 @@ def _env_int(key: str, default: int) -> int:
     try:
         return int(raw)
     except ValueError:
+        _warn_bad_env(key, raw, default)
         return default
+
+
+def _env_float(key: str, default: float) -> float:
+    """Like :func:`_env_int` but keeps the fraction.
+
+    TOOL_TIMEOUT went through `_env_int`, so `TOOL_TIMEOUT=2.5` raised
+    ValueError and silently became 10 -- a sub-second tool budget could not be
+    expressed at all, and nothing said so.
+    """
+    raw = os.getenv(key)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        _warn_bad_env(key, raw, default)
+        return default
+
+
+def _warn_bad_env(key: str, raw: str, default) -> None:
+    warnings.warn(
+        f"{key}={raw!r} is not a valid number; falling back to {default!r}",
+        RuntimeWarning,
+        stacklevel=3,
+    )
 
 
 def _env_str(key: str, default: str) -> str:
@@ -97,6 +124,37 @@ class Config:
             problems.append("ANTHROPIC_API_KEY")
         if not self.model:
             problems.append("MODEL_ID")
+        problems.extend(self.invalid_limits())
+        return problems
+
+    def invalid_limits(self) -> list[str]:
+        """Fields that are set but would misbehave, as ``FIELD=why`` strings.
+
+        The numbers all have a zero or a negative, and every one of them was
+        accepted silently before.  MAX_TURNS=0 makes range(1, 1) empty, so the
+        for/else in run_turn wraps up on the spot and the agent answers
+        nothing; MAX_TURNS=-5 behaves the same.  MAX_TOOL_RESULT_CHARS=-1
+        truncates to text[:-1] on every result, quietly corrupting tool output.
+        TOOL_TIMEOUT=0 makes every tool time out immediately.  Catching them at
+        load time turns a mysterious wrong answer into a named setting.
+        """
+        problems: list[str] = []
+        for name in (
+            "max_turns",
+            "max_repeat_call",
+            "max_tool_result_chars",
+            "context_budget",
+            "keep_recent_messages",
+            "summary_max_chars",
+            "memory_top_k",
+            "memory_ttl_days",
+        ):
+            if getattr(self, name) <= 0:
+                problems.append(f"{name.upper()}=must be > 0 (got {getattr(self, name)})")
+        for name in ("tool_timeout", "request_timeout"):
+            value = getattr(self, name)
+            if value <= 0:
+                problems.append(f"{name.upper()}=must be > 0 (got {value})")
         return problems
 
 
@@ -114,8 +172,9 @@ def load_config(**overrides) -> Config:
         base_url=os.getenv("ANTHROPIC_BASE_URL") or None,
         max_turns=_env_int("MAX_TURNS", 12),
         max_repeat_call=_env_int("MAX_REPEAT_CALL", 3),
-        tool_timeout=float(_env_int("TOOL_TIMEOUT", 10)),
+        tool_timeout=_env_float("TOOL_TIMEOUT", 10.0),
         max_tool_result_chars=_env_int("MAX_TOOL_RESULT_CHARS", 2000),
+        request_timeout=_env_float("REQUEST_TIMEOUT", 120.0),
         weather_backend=_env_str("WEATHER_BACKEND", "mock"),
         context_budget=_env_int("CONTEXT_BUDGET", 24_000),
         keep_recent_messages=_env_int("KEEP_RECENT_MESSAGES", 6),

@@ -12,6 +12,7 @@ import os
 import sys
 import threading
 import time
+from collections import deque
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, TextIO
@@ -38,6 +39,12 @@ CYAN = _c("\033[36m")
 RESET = _c("\033[0m")
 
 
+# How many events to keep in RAM for `of_kind`/`last`.  Generous enough that a
+# normal turn's worth is always resident, small enough that a multi-hour REPL
+# cannot grow without bound.
+_DEFAULT_EVENTS_KEEP = 2000
+
+
 @dataclass
 class TraceEvent:
     ts: float
@@ -62,9 +69,14 @@ class Tracer:
         prefix: str = "",
         console: bool = True,
         stream: TextIO | None = None,
+        events_keep: int = _DEFAULT_EVENTS_KEEP,
     ):
         self.session_id = session_id
-        self.events: list[TraceEvent] = []
+        # Bounded: a long REPL used to grow this list for the lifetime of the
+        # process, one full copy of every event (including complete tool output)
+        # held in RAM.  The JSONL file on disk is the real record and is
+        # unbounded on purpose; this is only the in-memory query window.
+        self.events: deque[TraceEvent] = deque(maxlen=events_keep)
         self.console = console
         self._stream = stream or sys.stdout
         self._lock = threading.Lock()
@@ -196,8 +208,12 @@ class Tracer:
         return [e for e in self.events if e.kind in wanted]
 
     def last(self, kind: str) -> TraceEvent | None:
-        found = self.of_kind(kind)
-        return found[-1] if found else None
+        # Reverse scan, so a bounded window still answers "most recent" in O(1)
+        # amortised rather than materialising the whole filter.
+        for event in reversed(self.events):
+            if event.kind == kind:
+                return event
+        return None
 
 
 def _short(value: Any, limit: int = 120) -> str:

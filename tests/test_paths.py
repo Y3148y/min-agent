@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import threading
+from pathlib import Path
 
 import pytest
 
 from min_agent import paths
 from min_agent.paths import atomic_write_text, ensure_within, safe_segment
+from min_agent.trace import Tracer
 
 
 # --------------------------------------------------------------------------- #
@@ -213,6 +215,98 @@ def test_transcript_survives_a_failed_rewrite(tmp_path, monkeypatch):
         session._rewrite_jsonl()
 
     assert transcript.read_text(encoding="utf-8") == before
+
+
+# --------------------------------------------------------------------------- #
+# resource bounds
+# --------------------------------------------------------------------------- #
+
+
+def test_in_memory_event_window_is_bounded(tmp_path):
+    """Regression: Tracer.events was an unbounded list.
+
+    Every event, including the full text of every tool result, was retained for
+    the life of the process.  A long REPL grew the heap monotonically even
+    though the JSONL on disk is the actual record.
+    """
+    with Tracer("s", traces_root=tmp_path, console=False, events_keep=50) as tr:
+        for i in range(500):
+            tr.emit("tool_result", i=i, pad="x" * 200)
+
+        assert len(tr.events) == 50
+        # The window keeps the *newest* events, so the eviction order is right.
+        assert tr.events[-1].data["i"] == 499
+        assert tr.last("tool_result").data["i"] == 499
+
+        # The file on disk is unaffected -- unbounded on purpose.
+        assert len(tr.path.read_text(encoding="utf-8").strip().splitlines()) == 500
+
+
+def test_add_is_idempotent_on_normalised_text(tmp_path):
+    """Regression: `todo.add` minted max(id)+1 on every call.
+
+    The model retries tool calls (a turn that ran out of output budget, a tool
+    that came back is_error), and each retry appended another copy of the same
+    todo with a new id.
+    """
+    from min_agent.tools.todo import TodoStore
+
+    store = TodoStore(tmp_path / "todo.json")
+    first = store.add("买 菜")
+    again = store.add("买菜")  # differs only in whitespace
+    third = store.add("买 菜")
+
+    assert first.id == again.id == third.id
+    assert len(store.items) == 1
+
+
+def test_add_still_allows_distinct_items_and_keeps_ids_unique(tmp_path):
+    from min_agent.tools.todo import TodoStore
+
+    store = TodoStore(tmp_path / "todo.json")
+    a = store.add("买菜")
+    b = store.add("取快递")
+    assert (a.id, b.id) == (1, 2)
+    assert len(store.items) == 2
+
+
+def test_out_of_range_limits_are_reported_by_name(monkeypatch):
+    """Regression: MAX_TURNS=0 made range(1, 1) empty and the agent answered
+    nothing at all, with no error anywhere.  Zero and negative were accepted
+    for every numeric setting."""
+    from min_agent.config import Config
+
+    cfg = Config(api_key="k", model="m", workspace=Path("."), max_turns=0)
+    problems = cfg.invalid_limits()
+    assert any("MAX_TURNS" in p for p in problems)
+
+    cfg = Config(
+        api_key="k",
+        model="m",
+        workspace=Path("."),
+        max_tool_result_chars=-1,
+    )
+    assert any("MAX_TOOL_RESULT_CHARS" in p for p in cfg.invalid_limits())
+
+    good = Config(api_key="k", model="m", workspace=Path("."))
+    assert good.invalid_limits() == []
+
+
+def test_a_sub_second_tool_timeout_is_expressible(monkeypatch):
+    """Regression: TOOL_TIMEOUT went through _env_int, so 2.5 raised
+    ValueError and silently became 10."""
+    from min_agent import config as config_mod
+
+    monkeypatch.setenv("TOOL_TIMEOUT", "2.5")
+    assert config_mod._env_float("TOOL_TIMEOUT", 10.0) == 2.5
+
+
+def test_an_unparseable_env_value_warns_instead_of_vanishing(monkeypatch):
+    from min_agent import config as config_mod
+
+    monkeypatch.setenv("MAX_TURNS", "twelve")
+    with pytest.warns(RuntimeWarning, match="MAX_TURNS"):
+        assert config_mod._env_int("MAX_TURNS", 12) == 12
 
 
 def test_module_exports_are_the_three_helpers():

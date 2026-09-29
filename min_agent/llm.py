@@ -81,7 +81,15 @@ class AnthropicLLM:
         from anthropic import Anthropic
 
         self.config = config
-        self.client = Anthropic(api_key=config.api_key, base_url=config.base_url)
+        # request_timeout used to be a config field that nothing read, so the
+        # SDK's own default (10 minutes) applied and one slow gateway could hold
+        # a turn open that long.  The per-call overrides in _request_kwargs
+        # exist because the summariser needs its own, smaller budget.
+        self.client = Anthropic(
+            api_key=config.api_key,
+            base_url=config.base_url,
+            timeout=config.request_timeout,
+        )
         self._last_latency_ms = 0
 
     @property
