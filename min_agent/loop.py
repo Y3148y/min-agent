@@ -393,6 +393,8 @@ class Agent:
         # Persist recall hit counters accumulated since the last explicit write.
         self.memory.flush()
         self.trace.close()
+        # Last, so everything above was still covered by the window lock.
+        self.session.close()
 
 
 def _strip_thinking(content: list[dict]) -> list[dict]:

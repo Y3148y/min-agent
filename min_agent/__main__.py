@@ -1,9 +1,11 @@
 """Command-line entry point: ``min-agent``.
 
 One user, many windows. A window is session with its own transcript, todo
-list and trace; two processes may talk in two windows at once. ``patrol()``
-runs on close so the long-term memory sweep happens exactly when a window
-ends.
+list and trace; two processes may talk in two *different* windows at once, and
+the store hands out one writer per window (see
+:class:`~min_agent.store.SessionStore`) so a second process on the same window
+is refused instead of quietly clobbering the first one's turns.  ``patrol()``
+runs on close so the long-term memory sweep happens exactly when a window ends.
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ import shlex
 import sys
 
 from .config import load_config
+from .paths import LockBusy
 from .store import SessionStore
 
 
@@ -61,7 +64,13 @@ def main(argv: list[str] | None = None) -> int:
     from .loop import Agent
     from .trace import Tracer
 
-    opened = store.open(args.user, args.session, create=True)
+    try:
+        opened = store.open(args.user, args.session, create=True)
+    except LockBusy as exc:
+        # Expected, and the user's mistake to fix, so: one line, exit 2.  A
+        # traceback here would read like the tool is broken.
+        print(f"[min-agent] {exc}", file=sys.stderr)
+        return 2
     trace = Tracer(
         args.session,
         traces_root=config.traces_root,

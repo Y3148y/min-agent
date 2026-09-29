@@ -73,10 +73,18 @@ def test_transcript_round_trip_resume(cfg):
 
 
 def test_store_reopen_returns_same_transcript(cfg):
+    """Reopening a window must see everything the previous process persisted.
+
+    ``s1.close()`` first is not incidental: a window has exactly one writer, and
+    the store hands the lock to whoever opened it.  Two live handles on one
+    window is the bug this lock exists to prevent, so the test has to model the
+    real sequence -- leave the window, then come back to it.
+    """
     store = SessionStore(cfg.sessions_root)
     s1 = store.open("alice", "reopen", create=True)
     s1.append("user", "hello")
     s1.append("assistant", "hi")
+    s1.close()
     s2 = store.open("alice", "reopen", create=False)
     assert [m["content"] for m in s2.messages] == ["hello", "hi"]
 

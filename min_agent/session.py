@@ -42,27 +42,47 @@ class SessionMeta:
 
 
 class Session:
-    """In-memory state + durable store for one window."""
+    """In-memory state + durable store for one window.
 
-    def __init__(self, meta: SessionMeta, node_dir: Path):
+    A Session is the *writer* of its directory, so it normally holds that
+    directory's exclusive lock for its whole lifetime.  The lock is optional
+    (``lock=None``) for the read-only and unit-test constructions; the CLI path
+    always goes through :meth:`~min_agent.store.SessionStore.open`, which takes
+    it.  Whoever holds it must call :meth:`close`.
+    """
+
+    def __init__(self, meta: SessionMeta, node_dir: Path, *, lock=None):
         self.meta = meta
         self.dir = node_dir
+        self._lock = lock
         self.messages: list[dict[str, Any]] = []
         self._load_transcript()
 
+    def __enter__(self) -> "Session":
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Release the window lock.  Idempotent, and a no-op without a lock."""
+        lock, self._lock = self._lock, None
+        if lock is not None:
+            lock.release()
+
     # -- construction -------------------------------------------------------
     @classmethod
-    def create(cls, session_id: str, user: str, node_dir: Path) -> "Session":
+    def create(cls, session_id: str, user: str, node_dir: Path, *, lock=None) -> "Session":
         # Sanitise: the id later becomes a directory name, so it must not be a
         # path escape or contain Windows-reserved characters.
         safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in session_id).strip() or "default"
         node_dir.mkdir(parents=True, exist_ok=True)
-        return cls(SessionMeta(id=safe, user=user), node_dir)
+        return cls(SessionMeta(id=safe, user=user), node_dir, lock=lock)
 
     @classmethod
-    def load(cls, node_dir: Path) -> "Session":
+    def load(cls, node_dir: Path, *, lock=None) -> "Session":
         meta = _read_meta(node_dir)
-        return cls(meta, node_dir)
+        return cls(meta, node_dir, lock=lock)
 
     # -- persistence -------------------------------------------------------
     def _load_transcript(self) -> None:

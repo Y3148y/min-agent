@@ -43,3 +43,4 @@ min_agent/
 
 - `trace.py`：每次工具调用、每次压缩、每条记忆都落 JSONL，供复盘。
 - 会话为"每窗口一目录"的纯 JSON 结构，与 SDK 无关；中断后重新加载会自动清理悬空的 `tool_use`/`tool_result` 对。
+- 每窗口一进程：`SessionStore.open` 对 `<session>/.lock` 取排它锁（锁的寿命=窗口生命周期，内核句柄随进程消亡自动释放），第二个进程打开同一窗口会得到 `LockBusy`，CLI 打印一行提示并以退出码 2 结束。同一用户的不同窗口各锁各的，可并行。

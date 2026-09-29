@@ -17,8 +17,12 @@
 - "用哪个库调 LLM？" → 选 anthropic python SDK（已验证对话流），保留 httpx/openai 备用。
 - "多窗口怎么并发？" → 每窗口一个进程 + 每窗口独立会话目录；会话存储用目录而非全局内存。
   （此处更正：最初写的是"单进程多线程"，但实现里 `__main__` 没有任何线程，REPL 的
-  `input()` 和 `run_turn()` 都在主线程串行执行；进程内唯一的并发是同一回合的并行工具
-  调用 `ThreadPoolExecutor`（`loop.py:293`）。决策记录与实现不符，面试容易被追着问穿。）
+`input()` 和 `run_turn()` 都在主线程串行执行；进程内唯一的并发是同一回合的并行工具
+   调用 `ThreadPoolExecutor`（`loop.py:293`）。决策记录与实现不符，面试容易被追着问穿。）
+   —— 后续又补了一条硬约束：`SessionStore.open` 对 `<session>/.lock` 取 OS 排它锁，
+   "每窗口一进程"从约定变成强制的，第二进程会被 `LockBusy` 拒绝（CLI 退出码 2），
+   解决两个进程各留下一份内存状态、后写者把对方对话整段抹掉的问题（`paths.py` 的
+   `FileLock` + 本文件 2.12）。
 - "记忆结构？" → 三层（工作/情景/语义），语义层即 facts.json。
 - "放弃哪些？" → 不做真正的网络搜索、不做向量库、不做流式 UI。
 
@@ -110,13 +114,37 @@ schema 开销，触发了压缩器，而压缩器又调用了一次"模型"。
 
 **修复**：放宽为 `\d+[.,]\d+`（memory.py `_gate`）。
 
+### 2.12 "多窗口并发"原来是静默丢数据，不是并发
+
+**问题**：每个窗口都按需 `open` 同一会话目录，两个进程各加载一份 transcript
+副本、各 append 自己的回合、各把副本整文件写回去——后写者把先写者的回合
+无声删光。没有任何文件被写坏，所以原子写救不了，`{ok}` 也不会报错。
+
+**修复**：`SessionStore.open` 对 `<session>/.lock` 取 OS 排它锁（`FileLock`，
+Windows `LockFile` / POSIX `flock`），锁的生命周期=窗口生命周期。第二进程
+`open` 同一个窗口抛 `LockBusy`，CLI 打印一行（含占锁 pid）并以退出码 2 结束。
+锁是内核句柄，进程被 `kill -9` 也会自动释放，不会留下"锁死"状态。测试里为了
+模拟双进程开了真的两个 subprocess、还有一个硬杀持有者的用例（tests/test_cli.py、
+tests/test_paths.py）。多窗口（同用户不同 session）各自拿各自的锁，继续并行。
+
+### 2.13 facts.json 每回合全量重写
+
+**问题**：`recall()` 在每个用户回合开始都会跑，为了给命中条目的 `hits += 1`
+就调用 `save()` 把整个 facts.json 重写一遍——每回合关键路径上多一次 O(n) 落盘。
+
+**修复**：读路径不再写盘。`recall()` 只置 `_dirty`，窗口关闭时由
+`Agent.close()` → `MemoryStore.flush()` 一次性落盘（崩了只丢命中计数）。
+`remember()` 仍立即写。`save()` 顺带改成"读-改-写"：按 id 与磁盘现状合并，
+两个窗口先后存事实不再互相抹除；`_load` 容错（文件损坏/缺字段/未知字段行
+跳过不炸）也一并补上（memory.py）。
+
 ## 3. 组装过程提示词（要点）
 
 - "按上面的决策给出模块划分与文件清单，包含每个文件的职责、公开函数签名。"
   → 产出本文档第 0~2 节依赖的骨架。
 - "为 loop / session / context / memory 各写测试，遵守：离线测试用 ScriptedLLM，
   联网测试标 @pytest.mark.live 且默认不跑。" → 91 离线 + 5 live。
-  （构建当时；现已 144 离线 + 6 live，数字随缺陷修复新增的用例增长。）
+  （构建当时；现已 155 离线 + 6 live，数字随缺陷修复新增的用例增长。）
 - "最后的演示脚本要有代表性：一句问候、一次计算、一条待办、一次天气。"
 
 ## 4. 与需求逐条对照
@@ -130,7 +158,7 @@ schema 开销，触发了压缩器，而压缩器又调用了一次"模型"。
 | 上下文管理 | config（MAX_TURNS/MAX_REPEAT_CALL）+ context.py 压缩 |
 | 错误处理 | errors.py 分级 + 工具错误回填 + LLM 重试 |
 | 工具调用日志 | trace.py（JSONL + 控制台） |
-| 测试 | tests/（离线 144 + live 6） |
+| 测试 | tests/（离线 155 + live 6） |
 | 真实 LLM | llm.py（DashScope Anthropic 兼容端点） |
 | GitHub | README + 本文件 + git 历史 |
 | 记忆时序说明 | README「记忆」小节 + docs/architecture.md |

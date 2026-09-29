@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from pathlib import Path
 
@@ -312,4 +313,163 @@ def test_an_unparseable_env_value_warns_instead_of_vanishing(monkeypatch):
 def test_module_exports_are_the_three_helpers():
     assert paths.atomic_write_text is atomic_write_text
     assert paths.ensure_within is ensure_within
+
+
+# --------------------------------------------------------------------------- #
+# single-writer lock
+# --------------------------------------------------------------------------- #
+
+
+def test_a_second_holder_is_refused(tmp_path):
+    """The bug this exists for: two processes on one window each load a copy of
+    the transcript, each append, each write their copy back -- and whichever
+    finishes second deletes the other's turns, with no error anywhere.  Neither
+    file was ever torn, so atomic writes could not have caught it.
+    """
+    lock_path = tmp_path / "w" / ".lock"
+    first = paths.FileLock(lock_path, label="alice/w").acquire()
+    with pytest.raises(paths.LockBusy) as excinfo:
+        paths.FileLock(lock_path, label="alice/w").acquire()
+    assert "another process" in str(excinfo.value)
+    first.release()
+    # Released: the next writer gets in, which is what a closed window means.
+    paths.FileLock(lock_path, label="alice/w").acquire().release()
+
+
+def test_release_is_idempotent_and_the_file_survives(tmp_path):
+    lock_path = tmp_path / "w.lock"
+    lock = paths.FileLock(lock_path).acquire()
+    assert lock.held
+    lock.release()
+    lock.release()  # closing an already-closed window must not raise
+    assert not lock.held
+    assert lock_path.exists(), "the lock file is the marker, not the lock"
+
+
+def test_an_unreferenced_lock_releases_itself(tmp_path):
+    """The lock *is* the open handle, so GC closes it.
+
+    Worth pinning because it is a trap rather than an accident: writing
+    ``FileLock(p).acquire()`` and dropping the result looks like taking a lock
+    and silently does not, and the only symptom is a second process walking in.
+    """
+    import gc
+
+    lock_path = tmp_path / "w.lock"
+    paths.FileLock(lock_path).acquire()  # no reference kept -- collected right here
+    gc.collect()
+    with paths.FileLock(lock_path, timeout=0.2, poll=0.01) as survivor:
+        assert survivor.held, "the lock should have been released by collection"
+
+
+def test_store_open_keeps_the_lock_alive_for_the_window(tmp_path):
+    """The regression that matters: the lock must outlive the open() call.
+
+    If the store let the FileLock go out of scope, the window would look guarded
+    from outside while nothing held it -- and the bug it was added for would
+    come straight back.
+    """
+    from min_agent.store import SessionStore
+
+    store = SessionStore(tmp_path)
+    session = store.open("alice", "w", create=True)
+    try:
+        with pytest.raises(paths.LockBusy):
+            paths.FileLock(store.lock_path("alice", "w"), timeout=0.1, poll=0.01).acquire()
+    finally:
+        session.close()
+    paths.FileLock(store.lock_path("alice", "w"), timeout=0.2, poll=0.01).acquire().release()
+
+
+def test_two_different_windows_can_run_side_by_side(tmp_path):
+    """The lock is per window, not per user: separate conversations, and
+    serialising them would defeat the point of having windows at all."""
+    from min_agent.store import SessionStore
+
+    store = SessionStore(tmp_path)
+    a = store.open("alice", "w1", create=True)
+    b = store.open("alice", "w2", create=True)
+    try:
+        a.append("user", "in w1")
+        b.append("user", "in w2")
+        assert [m["content"] for m in a.messages] == ["in w1"]
+        assert [m["content"] for m in b.messages] == ["in w2"]
+    finally:
+        a.close()
+        b.close()
+
+
+def test_a_timeout_waits_instead_of_failing_immediately(tmp_path):
+    """Patrol-on-close and a slow flush can overlap a hand-off; a brief wait is
+    friendlier than refusing, and the kernel drops the lock when a process dies
+    so there is no stale-lock case to wait on."""
+    lock_path = tmp_path / "w.lock"
+    holder = paths.FileLock(lock_path).acquire()
+    result: list[str] = []
+
+    def grab():
+        try:
+            with paths.FileLock(lock_path, timeout=5.0, poll=0.01):
+                result.append("got it")
+        except paths.LockBusy:
+            result.append("busy")
+
+    waiter = threading.Thread(target=grab)
+    waiter.start()
+    holder.release()  # the window closes while the other process is waiting
+    waiter.join(timeout=5)
+    assert result == ["got it"]
+
+
+def test_the_error_names_the_process_that_won(tmp_path):
+    lock_path = tmp_path / "w.lock"
+    held = paths.FileLock(lock_path, label="alice/w1").acquire()
+    try:
+        with pytest.raises(paths.LockBusy) as excinfo:
+            paths.FileLock(lock_path, label="alice/w1", timeout=0.05, poll=0.01).acquire()
+        message = str(excinfo.value)
+        assert f"pid={os.getpid()}" in message
+        assert "alice/w1" in message
+    finally:
+        held.release()
+
+
+def test_the_lock_does_not_block_readers(tmp_path):
+    """Only writers serialise.  `min-agent sessions` and `min-agent trace` read
+    a live window's files, and atomic replacement already makes that safe."""
+    from min_agent.store import SessionStore
+
+    store = SessionStore(tmp_path)
+    session = store.open("alice", "w", create=True)
+    session.append("user", "hello")
+    try:
+        assert [r["user"] for r in store.list_sessions("alice")] == ["alice"]
+        assert session.dir.joinpath("meta.json").exists()
+    finally:
+        session.close()
+
+
+def test_the_lock_sidecar_is_not_mistaken_for_a_session(tmp_path):
+    from min_agent.store import SessionStore
+
+    store = SessionStore(tmp_path)
+    session = store.open("alice", "w", create=True)
+    session.append("user", "hello")  # this is what writes meta.json
+    session.close()
+
+    node = store.node_dir("alice", "w")
+    assert {p.name for p in node.iterdir()} >= {".lock", "meta.json"}
+    assert [r["id"] for r in store.list_sessions("alice")] == ["w"]
+
+
+def test_opening_a_missing_window_without_create_does_not_invent_one(tmp_path):
+    """``--session`` naming a window that does not exist yet is a legitimate
+    read (trace, sessions): it must not create a directory as a side effect."""
+    from min_agent.store import SessionStore
+
+    store = SessionStore(tmp_path)
+    assert store.exists("alice", "ghost") is False
+    store.open("alice", "ghost", create=False)
+    assert store.exists("alice", "ghost") is False
+
     assert paths.safe_segment is safe_segment

@@ -1,7 +1,7 @@
 """Filesystem helpers for a project that turns user input into paths and keeps
 its state in small JSON files.
 
-Two concerns, both of which had a hole at some point:
+Three concerns, each of which had a hole at some point:
 
 * **Names.**  ``--user`` and ``--session`` come straight off the command line,
   and two components turn them into file names: :class:`~min_agent.store.SessionStore`
@@ -14,6 +14,8 @@ Two concerns, both of which had a hole at some point:
   ``write_text`` leaves a torn file for any reader that catches it mid-write --
   and the obvious ``with_suffix('.tmp')`` scratch file has a *fixed* name, so
   two processes saving the same file race on it.
+* **Writers.**  Atomic writes make concurrent *readers* safe; they do nothing
+  for two concurrent *writers*, which is why :class:`FileLock` exists.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ import os
 import time
 import uuid
 from pathlib import Path
+from typing import IO
 
 
 def safe_segment(segment: str) -> str:
@@ -109,3 +112,155 @@ def _replace_with_retry(tmp: Path, path: Path, attempts: int = 6) -> None:
             if attempt == attempts - 1:
                 raise
             time.sleep(0.01 * (2**attempt))
+
+
+# --------------------------------------------------------------------------- #
+# single-writer lock
+# --------------------------------------------------------------------------- #
+# A session directory is *one writer, many readers*: the live window appends to
+# the transcript and rewrites meta.json, while `min-agent sessions` and
+# `min-agent trace` read from the side.  The atomic writes above already make
+# the readers safe -- they see the old file or the new one.  What they cannot
+# fix is two *writers*, because the real state is the in-memory message list:
+# two processes each load a copy, each append, and each write its own copy back,
+# so one silently deletes the other's turns.  No amount of atomicity helps,
+# because neither file was ever torn.
+#
+# The lock is advisory and held for the lifetime of the window, not per write.
+# A per-write lock would serialise the writes and still lose the turns, since
+# the second writer's in-memory list is already stale by the time it gets the
+# lock.
+#
+# It is an OS lock (``flock`` / ``LockFile``), not a marker file that has to be
+# cleaned up: the kernel drops it when the process dies, so a window that was
+# killed with Ctrl-C or a hard crash does not leave the next one locked out.
+
+# Byte 0 is the byte we lock on; the owner string follows it, fixed width so a
+# new owner can overwrite it in place without truncating a locked file.
+_OWNER_OFFSET = 1
+_OWNER_WIDTH = 64
+
+
+class LockBusy(RuntimeError):
+    """The lock is held by somebody else -- normally another live window."""
+
+
+class FileLock:
+    """An exclusive advisory lock on a sidecar file, held until released.
+
+    Used as a context manager, or via :meth:`acquire` / :meth:`release` when the
+    lifetime is the owner's (a window that stays open for hours, not a ``with``).
+
+    **Keep a reference to the object.**  The lock is the open file handle, so an
+    object nobody holds gets collected, the handle closes and the lock is gone --
+    without a word.  ``FileLock(p).acquire()`` on its own is a no-op that looks
+    like a lock.  Bind it (``lock = FileLock(p).acquire()``) or store it.
+    """
+
+    def __init__(
+        self,
+        path: Path,
+        *,
+        label: str = "",
+        timeout: float = 0.0,
+        poll: float = 0.05,
+    ):
+        self.path = path
+        self.label = label
+        self.timeout = timeout
+        self.poll = poll
+        self._fh: IO[bytes] | None = None
+
+    def __enter__(self) -> "FileLock":
+        return self.acquire()
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.release()
+
+    @property
+    def held(self) -> bool:
+        return self._fh is not None
+
+    def acquire(self) -> "FileLock":
+        """Take the lock and return ``self``, or raise :class:`LockBusy`.
+
+        The returned object owns the lock -- see the class docstring.
+        """
+        if self._fh is not None:
+            raise RuntimeError(f"lock already held: {self.path}")
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        fh = open(self.path, "a+b")
+        try:
+            fh.seek(0, os.SEEK_END)
+            if fh.tell() == 0:
+                fh.write(b"\0")  # a byte 0 exists, so byte 0 can be locked
+                fh.flush()
+            deadline = time.monotonic() + self.timeout
+            while True:
+                try:
+                    _lock_exclusive(fh)
+                    break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        raise LockBusy(self._busy_message()) from None
+                    time.sleep(self.poll)
+        except BaseException:
+            fh.close()
+            raise
+        self._fh = fh
+        self._stamp_owner()
+        return self
+
+    def release(self) -> None:
+        fh, self._fh = self._fh, None
+        if fh is None:
+            return
+        try:
+            _unlock(fh)
+        finally:
+            fh.close()
+
+    # -- internals ----------------------------------------------------------
+    def _stamp_owner(self) -> None:
+        """Record who holds it, so the loser's error message can say who won."""
+        assert self._fh is not None
+        who = f"pid={os.getpid()} {self.label}".encode("utf-8", "replace")
+        self._fh.seek(_OWNER_OFFSET)
+        self._fh.write(who[: _OWNER_WIDTH - 1].ljust(_OWNER_WIDTH - 1, b" "))
+        self._fh.flush()
+
+    def _busy_message(self) -> str:
+        who = ""
+        try:
+            with open(self.path, "rb") as fh:
+                fh.seek(_OWNER_OFFSET)
+                who = fh.read(_OWNER_WIDTH - 1).decode("utf-8", "replace").strip()
+        except OSError:
+            pass
+        held = f" (held by {who})" if who else ""
+        return (
+            f"another process already has this window open{held}: {self.path}. "
+            f"Each window takes exactly one process; open a different --session."
+        )
+
+
+if os.name == "nt":
+    import msvcrt
+
+    def _lock_exclusive(fh: IO[bytes]) -> None:
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+
+    def _unlock(fh: IO[bytes]) -> None:
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+
+else:
+    import fcntl
+
+    def _lock_exclusive(fh: IO[bytes]) -> None:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def _unlock(fh: IO[bytes]) -> None:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
