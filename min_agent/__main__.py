@@ -181,12 +181,16 @@ def _format_event(event: dict) -> str:
 
 
 def _cmd_tools(config, args) -> int:
+    from .memory import MemoryStore
     from .tools import ToolContext, build_registry
 
     session_dir = config.sessions_root / "cli" / "tools-preview"
     session_dir.mkdir(parents=True, exist_ok=True)
     ctx = ToolContext(session_id="cli", session_dir=session_dir, config=config)
-    registry, _ = build_registry(ctx)
+    # `memory` is what makes `remember` appear; without it this command listed
+    # five tools while the running agent had six.
+    memory = MemoryStore(config.memory_root / "cli" / "facts.json")
+    registry, _ = build_registry(ctx, memory=memory)
     for name in sorted(registry.names()):
         spec = registry.get(name)
         schema = spec.to_api().get("input_schema", {})

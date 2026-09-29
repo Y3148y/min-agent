@@ -9,7 +9,7 @@
 - ✅ 上下文管理：最长轮数上限、重复调用护栏、摘要式压缩
 - ✅ 错误处理：工具失败是数据、LLM 失败重试、分级异常
 - ✅ 运行痕迹：JSONL trace + 控制台渲染
-- ✅ 测试：`pytest` 全离线 91 项 + `pytest -m live` 真实 API 5 项
+- ✅ 测试：`pytest` 全离线 132 项 + `pytest -m live` 真实 API 6 项
 - ✅ 真实 LLM API（DashScope Anthropic 兼容端点）
 
 ## 快速开始
@@ -34,8 +34,8 @@ min-agent --user alice tools              # 列出可用工具
 测试：
 
 ```bash
-pytest tests/ -q               # 91 项离线（零网络）
-pytest -m live -q              # 5 项真实 API（联网，花钱/算力）
+pytest tests/ -q               # 132 项离线（零网络）
+pytest -m live -q              # 6 项真实 API（联网，花钱/算力）
 ```
 
 ## 系统设计
@@ -79,7 +79,7 @@ min_agent/
 
 超出 `CONTEXT_BUDGET`（默认 24000 估计 token）时：保留首条 user 锚点 + 最近 `KEEP_RECENT_MESSAGES` 条原文，中间段交摘要模型；`tool_use`/`tool_result` 必须成对移动；摘要**折叠进锚点 user 消息**以保持 user/assistant 交替；摘要失败退化为机械淘汰最早完整回合，**永不撕裂工具对**。
 
-## 工具（5 个）
+## 工具（6 个）
 
 | 工具 | 说明 |
 |---|---|
@@ -88,6 +88,7 @@ min_agent/
 | `weather` | 天气查询。默认 mock（确定性假数据）；`WEATHER_BACKEND=wttr.in` 走真实 wttr.in（免 key），不可达时自动回退 mock |
 | `todo` | 窗口内待办 add/list/done/remove/clear |
 | `read_docs` | 读取 `docs/` 项目文档（list/search/read/section） |
+| `remember` | 把一条事实写入 `.memory/<user>/facts.json`，经写入门控与去重。窗口关闭时的记忆抽取也走同一后端 |
 
 ## 数据分布
 
@@ -106,4 +107,4 @@ min_agent/
 
 - `docs/agent-handbook.md` 使用手册、`docs/architecture.md` 系统设计
 - `PROMPT_LOG.md` AI 提示词与问题解决过程记录（含关键探针）
-- `tests/` 99 项离线 + 6 项 live
+- `tests/` 132 项离线 + 6 项 live

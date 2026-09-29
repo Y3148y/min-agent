@@ -116,6 +116,7 @@ schema 开销，触发了压缩器，而压缩器又调用了一次"模型"。
   → 产出本文档第 0~2 节依赖的骨架。
 - "为 loop / session / context / memory 各写测试，遵守：离线测试用 ScriptedLLM，
   联网测试标 @pytest.mark.live 且默认不跑。" → 91 离线 + 5 live。
+  （构建当时；现已 132 离线 + 6 live，数字随缺陷修复新增的用例增长。）
 - "最后的演示脚本要有代表性：一句问候、一次计算、一条待办、一次天气。"
 
 ## 4. 与需求逐条对照
@@ -123,13 +124,13 @@ schema 开销，触发了压缩器，而压缩器又调用了一次"模型"。
 | 需求 | 落地位置 |
 |---|---|
 | 基本循环 4 步 | loop.py:103 `run_turn` |
-| ≥3 个工具 + 注册 | tools/（5 个），schema 从类型注解推导 |
+| ≥3 个工具 + 注册 | tools/（6 个），schema 从类型注解推导 |
 | 输出解析 | parser.py（think/text/tool_use/文本兜底） |
 | 多窗口会话 | store.py + session.py，每窗口一目录 |
 | 上下文管理 | config（MAX_TURNS/MAX_REPEAT_CALL）+ context.py 压缩 |
 | 错误处理 | errors.py 分级 + 工具错误回填 + LLM 重试 |
 | 工具调用日志 | trace.py（JSONL + 控制台） |
-| 测试 | tests/（离线 91 + live 5） |
+| 测试 | tests/（离线 132 + live 6） |
 | 真实 LLM | llm.py（DashScope Anthropic 兼容端点） |
 | GitHub | README + 本文件 + git 历史 |
 | 记忆时序说明 | README「记忆」小节 + docs/architecture.md |
