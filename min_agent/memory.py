@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .llm import LLMRequest
+from .paths import atomic_write_text
 
 _WORDS = re.compile(r"[a-z0-9]+|[一-鿿]")
 _EN_STOP = {
@@ -94,12 +95,10 @@ class MemoryStore:
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(
+        atomic_write_text(
+            self.path,
             json.dumps([asdict(i) for i in self._items], ensure_ascii=False, indent=2),
-            encoding="utf-8",
         )
-        tmp.replace(self.path)
 
     # -- store timing: explicit tool + end-of-session extraction ----------
     def remember(self, text: str, source_session: str, *, tags: Iterable[str] = ()) -> str:

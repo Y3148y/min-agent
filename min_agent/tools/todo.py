@@ -9,13 +9,13 @@ tool carries per-session state.
 from __future__ import annotations
 
 import json
-import os
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Annotated, Any, Callable
 
 from ..errors import ToolError
+from ..paths import atomic_write_text
 from .base import ToolSpec, tool
 
 _STATUS = ("pending", "done")
@@ -53,13 +53,10 @@ class TodoStore:
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".json.tmp")
-        tmp.write_text(
+        atomic_write_text(
+            self.path,
             json.dumps([asdict(i) for i in self.items], ensure_ascii=False, indent=2),
-            encoding="utf-8",
         )
-        # Atomic replace: a crash mid-write leaves the previous list intact.
-        os.replace(tmp, self.path)
 
     def add(self, text: str) -> TodoItem:
         nid = max((i.id for i in self.items), default=0) + 1

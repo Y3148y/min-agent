@@ -8,9 +8,14 @@ A session is a directory::
         todo.json          # this window's todo list
         summary.md         # what the compaction step most recently derived
 
-Appending is the only write path for the transcript, so an interrupted
-process can never corrupt earlier turns.  Everything here is plain
-``dict``-shaped so a session can be reloaded without any SDK imports.
+Appending is the only write path for the transcript *while a turn is running*:
+it opens the file in "a" mode and writes one line, so a half-written line is
+the only thing a crash can produce, and ``_load_transcript`` drops a trailing
+partial line.  Three paths rewrite the whole file, and all three go through
+:func:`atomic_write_text` -- compaction, turn repair and rollback, each of which
+used to truncate first and would have lost the session outright if interrupted.
+Everything here is plain ``dict``-shaped so a session can be reloaded without
+any SDK imports.
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from .parser import ParsedTurn
+from .paths import atomic_write_text
 
 
 @dataclass
@@ -72,12 +78,10 @@ class Session:
 
     def _save_meta(self) -> None:
         self.dir.mkdir(parents=True, exist_ok=True)
-        tmp = self.dir / "meta.json.tmp"
-        tmp.write_text(
-            json.dumps(asdict(self.meta), ensure_ascii=False, indent=2), encoding="utf-8"
+        atomic_write_text(
+            self.dir / "meta.json",
+            json.dumps(asdict(self.meta), ensure_ascii=False, indent=2),
         )
-        # atomic replace keeps a crash from halving a meta file
-        tmp.replace(self.dir / "meta.json")
 
     def append(self, role: str, content: Any) -> None:
         message = {"role": role, "content": content}
@@ -127,9 +131,13 @@ class Session:
             fh.write(json.dumps(message, ensure_ascii=False) + "\n")
 
     def _rewrite_jsonl(self) -> None:
-        with (self.dir / "transcript.jsonl").open("w", encoding="utf-8") as fh:
-            for message in self.messages:
-                fh.write(json.dumps(message, ensure_ascii=False) + "\n")
+        atomic_write_text(
+            self.dir / "transcript.jsonl",
+            "".join(
+                json.dumps(message, ensure_ascii=False) + "\n"
+                for message in self.messages
+            ),
+        )
 
     # -- views --------------------------------------------------------------
     def user_messages(self) -> list[dict[str, Any]]:
