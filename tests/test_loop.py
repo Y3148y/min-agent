@@ -227,3 +227,41 @@ def test_llm_request_shapes_are_api_compatible(agent, llm):
     assert saved == agent.session.messages  # nothing to repair
     roles = [m["role"] for m in saved]
     assert all(roles[i] != roles[i + 1] for i in range(len(roles) - 1))
+
+
+# --------------------------------------------------------------------------- #
+# memory TTL is actually wired to the store
+# --------------------------------------------------------------------------- #
+
+
+def test_expired_memories_are_not_recalled(agent, llm, cfg):
+    """Regression: the loop called recall() without ttl_days.
+
+    `MemoryStore.recall` treats `ttl_days=None` as "no cutoff", so the
+    configured MEMORY_TTL_DAYS (and the README's "TTL 90 天") never applied --
+    nothing could ever expire.  The store's own TTL is covered in
+    test_memory.py; what was untested is that anybody passed the argument.
+    """
+    import time
+
+    agent.memory.remember("用户常驻厦门", "w-test")
+    agent.memory.remember("用户喜欢跑步", "w-test")
+
+    now = time.time()
+    for item in agent.memory.all():
+        # one is fresh, one is older than the 1-day budget below
+        if "厦门" in item.text:
+            item.created_at = now - 5 * 86400
+    agent.memory.save()
+
+    cfg.memory_ttl_days = 1
+    llm.script = [{"content": [text_block("知道了。")], "stop_reason": "end_turn"}]
+    agent.run_turn("用户住哪里，喜欢什么")
+
+    hits = [h for ev in agent.trace.events if ev.kind == "memory_recall" for h in ev.data["hits"]]
+    assert hits, "expected the fresh memory to still be recalled"
+    assert not any("厦门" in h for h in hits), "expired memory was recalled"
+
+    system = llm.requests[0].system
+    assert "跑步" in system
+    assert "厦门" not in system

@@ -110,8 +110,14 @@ class Agent:
         self.session.append("user", user_input)
 
         # Memory recall runs here, before the model is ever asked -- the 
-        # current user input is the query.
-        memory_items = self.memory.recall(user_input, top_k=self.config.memory_top_k)
+        # current user input is the query.  `ttl_days` is not optional: without
+        # it `recall` sets its cutoff to 0 and nothing ever expires, so the
+        # MEMORY_TTL_DAYS guarantee in the README would be fiction.
+        memory_items = self.memory.recall(
+            user_input,
+            top_k=self.config.memory_top_k,
+            ttl_days=self.config.memory_ttl_days,
+        )
         if memory_items:
             self.trace.emit("memory_recall", hits=[m.text for m in memory_items])
 
