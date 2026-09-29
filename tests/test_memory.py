@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import time
 
+from min_agent import memory as memory_module
 from min_agent.memory import MemoryStore, extract_facts
 
 from fake_llm import ScriptedLLM, text_block
@@ -81,6 +83,106 @@ def test_recall_increments_hit_counter(tmp_path):
     store = _store(tmp_path, "用户住在北京")
     store.recall("北京在哪里")
     assert store.all()[0].hits == 1
+
+
+# --------------------------------------------------------------------------- #
+# the write path: a read must not write, and a write must not clobber
+# --------------------------------------------------------------------------- #
+
+
+def _count_writes(monkeypatch) -> list:
+    """Record every atomic write the store performs."""
+    calls: list = []
+    real = memory_module.atomic_write_text
+
+    def spy(path, text):
+        calls.append(path)
+        return real(path, text)
+
+    monkeypatch.setattr(memory_module, "atomic_write_text", spy)
+    return calls
+
+
+def test_recall_does_not_touch_disk(monkeypatch, tmp_path):
+    """recall() runs at the start of every user turn.
+
+    It used to call save() to bump the hit counter, i.e. rewrite the whole
+    facts.json on the critical path of every turn for a number nothing reads
+    back.  Read path must stay read-only.
+    """
+    store = _store(tmp_path, "用户住在北京", "用户喜欢简洁的回答")
+    calls = _count_writes(monkeypatch)  # patch after the setup writes
+    store.recall("北京", top_k=2)
+    assert calls == [], f"recall() wrote to disk: {calls}"
+
+
+def test_hit_counters_persist_at_flush(tmp_path):
+    """Deferring the write must not defer the counter past the window edge."""
+    store = _store(tmp_path, "用户住在北京")
+    store.recall("北京")
+    assert store._dirty, "recall() should have marked the store dirty"
+    store.flush()
+    assert MemoryStore(tmp_path / "facts.json").all()[0].hits == 1
+
+
+def test_flush_is_a_no_op_when_nothing_changed(tmp_path):
+    store = _store(tmp_path, "用户住在北京")
+    before = (tmp_path / "facts.json").read_bytes()
+    store.flush()
+    assert (tmp_path / "facts.json").read_bytes() == before
+
+
+def test_two_windows_do_not_erase_each_others_facts(tmp_path):
+    """Each window builds its own MemoryStore at startup, so two windows hold
+    two divergent in-memory lists of the same file.  Window A loads first, then
+    B stores a fact, then A stores one too -- A's list is now stale, and the
+    old save() wrote A's list verbatim, silently deleting B's fact.
+    """
+    path = tmp_path / "facts.json"
+    a = MemoryStore(path)
+    b = MemoryStore(path)  # second window, also loaded before either write
+    a.remember("用户住在北京", "w1")
+    b.remember("用户喜欢跑步", "w2")
+    a.remember("用户常驻厦门", "w1")  # a is the stale writer now
+
+    texts = {i.text for i in MemoryStore(path).all()}
+    assert texts == {"用户住在北京", "用户喜欢跑步", "用户常驻厦门"}
+    assert [i.text for i in b.all()] == ["用户住在北京", "用户喜欢跑步"]
+
+
+def test_corrupt_facts_file_degrades_to_empty(tmp_path):
+    """A truncated write must not brick the window; memory is an optimisation."""
+    path = tmp_path / "facts.json"
+    path.write_text("{not json at all", encoding="utf-8")
+    store = MemoryStore(path)
+    assert store.all() == []
+    store.remember("用户住在北京", "w1")
+    assert [i.text for i in MemoryStore(path).all()] == ["用户住在北京"]
+
+
+def test_row_with_unknown_field_is_skipped_not_fatal(tmp_path):
+    path = tmp_path / "facts.json"
+    path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "a",
+                    "text": "旧事实",
+                    "tags": [],
+                    "source_session": "w0",
+                    "created_at": 0.0,
+                    "hits": 0,
+                    "embedding": [0.1],  # a field this version knows nothing about
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    assert MemoryStore(path).all() == []
+    # the stale file is still usable: a new fact can be stored over it
+    MemoryStore(path).remember("用户常驻厦门喜欢跑步", "w1")
+    assert len(MemoryStore(path).all()) == 1
 
 
 # --------------------------------------------------------------------------- #

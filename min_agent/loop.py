@@ -390,6 +390,8 @@ class Agent:
         return stored
 
     def close(self) -> None:
+        # Persist recall hit counters accumulated since the last explicit write.
+        self.memory.flush()
         self.trace.close()
 
 

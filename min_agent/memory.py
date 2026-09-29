@@ -74,31 +74,76 @@ class MemoryItem:
     hits: int = 0
 
 
+def _read_rows(path: Path) -> list[MemoryItem]:
+    """Load ``facts.json``, tolerating a file that is absent or corrupt.
+
+    An unreadable store degrades to "no memories" rather than taking down the
+    window: memory is an optimisation, and a person asking a question does not
+    care whether the long-term file parsed.
+    """
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        return []
+    if not isinstance(data, list):
+        return []
+    rows: list[MemoryItem] = []
+    for row in data:
+        if not isinstance(row, dict) or "id" not in row or "text" not in row:
+            continue
+        try:
+            rows.append(MemoryItem(**row))
+        except TypeError:
+            continue  # a row from a future/other schema -- skip, don't crash
+    return rows
+
+
 class MemoryStore:
     """Long-term facts for one user, persisted as JSON."""
 
     def __init__(self, path: Path):
         self.path = path
         self._items: list[MemoryItem] = []
+        self._dirty = False
         self._load()
 
     # -- persistence -------------------------------------------------------
+    # Two rules, both learned the hard way:
+    #
+    # 1. Nothing on the *read* path writes.  recall() runs at the start of every
+    #    user turn, and it used to call save() just to bump a usage counter --
+    #    an O(n) rewrite of the whole file on the critical path of every turn.
+    #    The counter is diagnostic, not state anything reads back, so it is now
+    #    held in memory and flushed at an explicit boundary (:meth:`flush`).
+    #    A crash loses hit counts; nothing else.
+    # 2. A write is read-merge-write, not a rewrite of a stale list.  Each
+    #    window builds its own MemoryStore at startup, so two windows of the
+    #    same user hold two divergent in-memory lists; whoever saved second used
+    #    to erase the other's facts outright.  Merging on id keeps both.
+
     def _load(self) -> None:
-        if not self.path.exists():
-            return
-        try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            self._items = []
-            return
-        self._items = [MemoryItem(**row) for row in data if isinstance(row, dict)]
+        self._items = _read_rows(self.path)
+        self._dirty = False
 
     def save(self) -> None:
+        """Persist the store, keeping rows another window wrote since we loaded."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        merged: dict[str, MemoryItem] = {i.id: i for i in _read_rows(self.path)}
+        for item in self._items:
+            merged[item.id] = item  # ours wins on conflict
+        self._items = list(merged.values())
         atomic_write_text(
             self.path,
             json.dumps([asdict(i) for i in self._items], ensure_ascii=False, indent=2),
         )
+        self._dirty = False
+
+    def flush(self) -> None:
+        """Write pending hit counters.  A no-op when nothing changed."""
+        if self._dirty:
+            self.save()
 
     # -- store timing: explicit tool + end-of-session extraction ----------
     def remember(self, text: str, source_session: str, *, tags: Iterable[str] = ()) -> str:
@@ -118,7 +163,7 @@ class MemoryStore:
         if existing is not None:
             existing.tags = sorted(set(existing.tags) | set(tags))
             existing.hits += 1
-            self.save()
+            self.save()  # explicit store -> durable now, not deferred
             return f"already remembered: {text}"
         item = MemoryItem(
             id=uuid.uuid4().hex[:12],
@@ -128,7 +173,7 @@ class MemoryStore:
             created_at=time.time(),
         )
         self._items.append(item)
-        self.save()
+        self.save()  # explicit store -> durable now, not deferred
         return f"remembered: {text}"
 
     def _gate(self, text: str) -> str:
@@ -187,8 +232,11 @@ class MemoryStore:
         top = scored[:top_k]
         for _, item in top:
             item.hits += 1
+        # Read path: mark dirty, do not write.  This runs at the start of every
+        # user turn, and a full rewrite here was an O(n) disk write per turn for
+        # a counter nothing reads back.  flush() persists it at the window edge.
         if top:
-            self.save()
+            self._dirty = True
         return [item for _, item in top]
 
     # -- digest for the system prompt ---------------------------------------

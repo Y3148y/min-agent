@@ -39,4 +39,7 @@ min-agent --user alice tools              # 列出模型可用的工具
 - `.sessions/<user>/<session-id>/` 每个窗口一个目录：对话记录、摘要、待办
 - `.traces/` 每次运行的工具调用、思考过程等 JSONL 痕迹
 - `.memory/<user>/facts.json` 跨窗口的长期记忆
+- 记忆的写入策略：**读路径不落盘**——`recall()` 只在内存里累加命中计数，关闭窗口时
+  统一 flush；`remember()` 立即落盘。写入是"读-改-写"，按 id 与磁盘上其他窗口刚写入的
+  条目合并，所以两个窗口先后存事实不会互相抹掉。文件损坏时降级为"无记忆"而不是报错退出。
 - 以上目录都在 `.gitignore` 中，不会被提交
