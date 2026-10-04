@@ -21,12 +21,8 @@ from .base import ToolSpec
 
 try:
     import jsonschema
-
-    _VALIDATION_ERRORS: tuple[type[Exception], ...] = (jsonschema.ValidationError,)
-    _VALIDATION_ERRORS += (jsonschema.SchemaError,)
 except ImportError:  # pragma: no cover - jsonschema is a hard dependency
     jsonschema = None  # type: ignore[assignment]
-    _VALIDATION_ERRORS = ()
 
 
 def _describe_validation_error(exc: Exception) -> str:
@@ -99,7 +95,12 @@ class ToolRegistry:
             return
         try:
             jsonschema.validate(args, spec.input_schema)
-        except _VALIDATION_ERRORS as exc:
+        except jsonschema.SchemaError as exc:
+            # Our schema is broken - a bug in the tool author's annotations,
+            # not a mistake by the model.  Raise it loudly instead of telling
+            # the model its (possibly correct) args are invalid.
+            raise ValueError(f"invalid JSON schema for {name!r}: {exc}") from exc
+        except jsonschema.ValidationError as exc:
             expected = spec.required_args()
             hint = f"{spec.name} expects {spec.input_schema}."
             if expected and "required" in str(exc):
@@ -127,6 +128,11 @@ class ToolRegistry:
 
         try:
             self.validate(name, args)
+        except ValueError as exc:
+            # Broken schema = our bug, not the model's args.  Still returned as
+            # data so a mapping session keeps running, but marked as internal so
+            # nobody mistakes it for a validation complaint.
+            return {**result, "ok": False, "error": f"internal error: {exc}", "latency_ms": _ms(started)}
         except ToolError as exc:
             return {**result, "ok": False, "error": exc.to_model(), "latency_ms": _ms(started)}
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Optional
 
 import pytest
 
@@ -46,6 +46,67 @@ def test_decorator_extracts_annotated_descriptions():
     assert schema["properties"]["times"]["type"] == "integer"
     assert "times" not in schema.get("required", [])  # has a default -> optional
     assert schema["required"] == ["name"]
+
+
+def test_container_types_map_to_valid_json_schema():
+    """Regression: list[str] mapped to the literal string "array[string]",
+    which is not a valid JSON Schema type and made jsonschema.validate raise
+    SchemaError (mis-reported as the model's fault).  Containers must emit real
+    array/object maps."""
+    @tool
+    def organize(
+        names: list[str],
+        index: dict[str, list[str]],
+        note: Optional[str] = None,
+    ) -> str:
+        """Organize things."""
+        return str(len(names))
+
+    schema = organize.input_schema
+    assert schema["properties"]["names"] == {"type": "array", "items": {"type": "string"}}
+    assert schema["properties"]["index"] == {
+        "type": "object",
+        "additionalProperties": {"type": "array", "items": {"type": "string"}},
+    }
+    assert schema["properties"]["note"]["type"] == "string"  # Optional unwraps
+    import jsonschema
+
+    jsonschema.validate(
+        {"names": ["a"], "index": {"x": ["b"]}}, schema
+    )  # must not raise SchemaError
+
+
+def test_schema_violation_becomes_struct_error():
+    from min_agent.tools.calculator import calculator
+
+    reg = ToolRegistry([calculator])
+    res = reg.call("calculator", {})  # expression is required
+    assert res["ok"] is False
+    assert "expression" in res["error"]
+    assert res["tool"] == "calculator"
+    assert "latency_ms" in res
+
+
+def test_broken_schema_surfaces_as_value_error_not_input_error():
+    """A schema bug is ours, not the model's: it must raise loudly instead of
+    being reported to the model as invalid arguments."""
+    from min_agent.tools.base import ToolSpec
+
+    from min_agent.tools.calculator import calculator
+
+    broken = ToolSpec(
+        name="broken",
+        description="x",
+        input_schema={"type": "array[string]"},  # old _json_type output
+        fn=lambda: "x",
+    )
+    reg = ToolRegistry([broken, calculator])
+    with pytest.raises(ValueError):
+        reg.validate("broken", {})
+    res = reg.call("broken", {})  # the loop-facing surface still returns data
+    assert res["ok"] is False
+    assert "internal error" in res["error"]
+    assert "Invalid arguments" not in res["error"]
 
 
 def test_duplicate_registration_rejected(tmp_path):

@@ -78,7 +78,7 @@ def _schema_from_signature(fn: Callable[..., Any]) -> dict[str, Any]:
         # so the resolved hint (which is a real object again) is the only place
         # Annotated[...] metadata can be read from.
         annotation = hints.get(pname, param.annotation)
-        entry: dict[str, Any] = {"type": _json_type(annotation)}
+        entry: dict[str, Any] = _schema_for(annotation)
         desc = _annotated_description(annotation)
         if desc:
             entry["description"] = desc
@@ -113,31 +113,48 @@ def typing_is_annotated(annotation: Any) -> bool:
     return hasattr(annotation, "__metadata__") and hasattr(annotation, "__origin__")
 
 
-def _json_type(python_type: Any) -> str:
-    """Map a Python type onto a JSON Schema type name."""
-    # Unwrap Annotated[...] / Optional[...] before looking at the real type.
+def _schema_for(python_type: Any) -> dict[str, Any]:
+    """Map one Python annotation onto a JSON Schema map.
+
+    Handles containers (``list[str]`` -> ``{"type":"array","items":...}``)
+    because the old code emitted the string ``"array[string]"``, which the
+    json-schema validator refuses to compile.  ``dict[str, X]`` also carries
+    ``additionalProperties``.  ``Annotated`` and ``Optional`` are unwrapped.
+    """
+    if typing_is_annotated(python_type):
+        args = [a for a in getattr(python_type, "__args__", ()) if a is not type(None)]
+        return _schema_for(args[0]) if args else {"type": "string"}
+
     origin = getattr(python_type, "__origin__", None)
     if origin is not None:
         args = [a for a in getattr(python_type, "__args__", ()) if a is not type(None)]
         if origin in (list, tuple, set):
-            item = args[0] if args else str
-            return f"array[{_json_type(item)}]"
+            item = _schema_for(args[0]) if args and args[0] is not Any else {"type": "string"}
+            return {"type": "array", "items": item}
+        if origin is dict:
+            value = args[1] if len(args) > 1 and args[1] is not Any else None
+            if value is not None:
+                return {"type": "object", "additionalProperties": _schema_for(value)}
+            return {"type": "object"}
         if args:
-            return _json_type(args[0])
-        return "string"
+            return _schema_for(args[0])
+        return {"type": "string"}
+
     if python_type is bool:
-        return "boolean"
+        return {"type": "boolean"}
     if python_type is int:
-        return "integer"
+        return {"type": "integer"}
     if python_type is float:
-        return "number"
+        return {"type": "number"}
+    if python_type is str:
+        return {"type": "string"}
     if python_type in (list, tuple, set):
-        return "array"
+        return {"type": "array"}
     if python_type is dict:
-        return "object"
+        return {"type": "object"}
     if python_type is type(None):
-        return "null"
-    return "string"
+        return {"type": "null"}
+    return {"type": "string"}
 
 
 def tool(
