@@ -332,8 +332,6 @@ def _tail_as_text(messages: list[dict], *, limit: int) -> str:
 
 
 def _parse_str_list(text: str) -> list[str]:
-    import json
-
     text = text.strip()
     start = text.find("[")
     end = text.rfind("]")

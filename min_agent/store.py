@@ -21,6 +21,7 @@ handled by merging on write instead, in
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -84,8 +85,6 @@ class SessionStore:
             meta = node / "meta.json"
             if not meta.exists():
                 continue
-            import json
-
             try:
                 data = json.loads(meta.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError, UnicodeDecodeError):
