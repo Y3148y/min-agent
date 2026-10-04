@@ -109,7 +109,6 @@ class LLMCompactor:
                 {"role": "assistant", "content": window},
             ],
             max_tokens=1024,
-            temperature=0,
         )
         response = self.llm.complete(request)
         summary = response.text.strip()

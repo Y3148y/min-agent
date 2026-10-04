@@ -11,7 +11,6 @@ runs on close so the long-term memory sweep happens exactly when a window ends.
 from __future__ import annotations
 
 import argparse
-import shlex
 import sys
 
 from .config import load_config

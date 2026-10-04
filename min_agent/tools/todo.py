@@ -13,7 +13,7 @@ import re
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Annotated, Any, Callable
+from typing import Annotated
 
 from ..errors import ToolError
 from ..paths import atomic_write_text

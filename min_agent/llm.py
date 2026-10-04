@@ -15,8 +15,8 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Iterator
-from dataclasses import asdict, dataclass, field
-from typing import Any, Callable, Protocol
+from dataclasses import dataclass, field
+from typing import Any, Protocol
 
 from .config import Config
 from .errors import call_with_retry
@@ -49,7 +49,6 @@ class LLMRequest:
     system: str = ""
     tools: list[dict[str, Any]] = field(default_factory=list)
     max_tokens: int = 4096
-    temperature: float = 0.2
 
 
 @dataclass
@@ -102,8 +101,7 @@ class AnthropicLLM:
             # NB: attention on temperature.  The anthropic SDK >= 1.x removed
             # `temperature` from the Messages.create surface entirely, and some
             # Anthropic-compatible gateways reject it as unknown -- so we do
-            # NOT forward request.temperature.  The per-task temperature intent
-            # stays recorded on LLMRequest for the scripted backend / tests.
+            # NOT forward it.
             response = call_with_retry(
                 lambda: self.client.messages.create(
                     model=self.config.model,

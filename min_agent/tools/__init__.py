@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, Callable
+from typing import Annotated, Any
 
 from ..config import Config
 from . import search  # noqa: F401  -- the submodule, not its ToolSpec

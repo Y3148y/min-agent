@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Annotated, Any, Callable
+from typing import Annotated
 
 from ..errors import ToolError
 from .. import textutil

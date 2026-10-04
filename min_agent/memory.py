@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -297,7 +297,6 @@ def extract_facts(messages: list[dict], llm: Any, *, max_facts: int = 8) -> list
     request = LLMRequest(
         messages=[{"role": "user", "content": prompt}],
         max_tokens=512,
-        temperature=0,
     )
     try:
         response = llm.complete(request)
