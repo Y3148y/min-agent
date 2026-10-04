@@ -163,6 +163,24 @@ def test_max_tokens_truncation_triggers_continuation(agent, llm):
     assert result.text == "答案是完整的这个。"
 
 
+def test_nudges_do_not_count_as_turns(agent, llm):
+    """Regression: the continuation ping after a truncated answer used to be a
+    normal ``append("user", ...)``, so meta.turn_count reported two turns for
+    one question, and result.turns reported the number of *tool calls*.  A
+    nudge is loop plumbing, not a turn; turns are model steps."""
+    llm.script = [
+        {"content": [think_block("先想"), text_block("最后")], "stop_reason": "max_tokens"},
+        {"content": [text_block("说完啦。")], "stop_reason": "end_turn"},
+    ]
+    result = agent.run_turn("一个需要续写的回答")
+    assert result.text == "说完啦。"
+    assert agent.session.meta.turn_count == 1, "one real user turn, no inflation"
+    assert result.turns == 2, "two model steps, not two turns and not tool-call count"
+    assert result.tool_calls == 0
+    # and the nudge itself is still in the transcript, just not counted
+    assert "继续" in [m["content"] for m in agent.session.messages if m["role"] == "user"][-1]
+
+
 # --------------------------------------------------------------------------- #
 # tool failure is data, not a crash
 # --------------------------------------------------------------------------- #

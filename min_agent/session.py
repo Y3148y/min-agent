@@ -108,11 +108,14 @@ class Session:
             json.dumps(asdict(self.meta), ensure_ascii=False, indent=2),
         )
 
-    def append(self, role: str, content: Any) -> None:
+    def append(self, role: str, content: Any, *, count_turn: bool = True) -> None:
         message = {"role": role, "content": content}
         self.messages.append(message)
         self._append_jsonl(message)
-        if role == "user":
+        if role == "user" and count_turn:
+            # A real turn, not an internal nudge like "（继续……）": nudges are
+            # loop plumbing and inflating turn_count with them made the `sessions`
+            # view say a window had 13 turns when it had 3.
             self.meta.turn_count += 1
         self.meta.updated_at = time.time()
         self._save_meta()

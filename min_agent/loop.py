@@ -133,6 +133,7 @@ class Agent:
             self.trace.emit("memory_recall", hits=[m.text for m in memory_items])
 
         recent_calls: list[str] = []
+        steps = 0
         try:
             for turn in range(1, self.config.max_turns + 1):
                 if recent_calls and recent_calls.count(recent_calls[-1]) >= self.config.max_repeat_call:
@@ -142,16 +143,17 @@ class Agent:
                     break
 
                 parsed = self._ask(memory_items, allow_tools=True)
+                steps += 1
 
                 if not parsed.should_act:
                     if parsed.truncated:
                         # Output budget ran out mid-answer: never hand a
                         # fragment to the user -- ask for its conclusion.
-                        self.session.append("user", "（继续。把答案说完，不要调用工具。）")
+                        self.session.append("user", "（继续。把答案说完，不要调用工具。）", count_turn=False)
                         self.trace.emit("warning", message="max_tokens reached; continuing")
                         continue
                     if not parsed.has_substantive_answer():
-                        self.session.append("user", "（没有收到可用回复，请直接给出答案。）")
+                        self.session.append("user", "（没有收到可用回复，请直接给出答案。）", count_turn=False)
                         self.trace.emit("warning", message="empty reply; nudging")
                         continue
                     result.text = parsed.final_answer
@@ -176,7 +178,7 @@ class Agent:
         except AgentAborted as exc:
             self._repair_last_turn("user")
             result.text = str(exc)
-        result.turns = len(recent_calls)
+        result.turns = steps
         return result
 
     # ------------------------------------------------------------------ #
