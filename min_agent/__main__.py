@@ -17,6 +17,10 @@ from .config import load_config
 from .paths import LockBusy
 from .store import SessionStore
 
+# A `trace` line shows one payload field at a time; keep it on a single line
+# whatever the model produced.
+_TRACE_LINE_TRUNCATE = 160
+
 
 def _print(*parts, **kw):
     print(*parts, flush=True, **kw)
@@ -187,7 +191,7 @@ def _format_event(event: dict) -> str:
         value = event.get(key)
         if value is None:
             continue
-        parts.append(f"{key}={str(value)[:160]}")
+        parts.append(f"{key}={str(value)[:_TRACE_LINE_TRUNCATE]}")
         break  # show the first meaningful payload only
     return "  ".join(parts)
 

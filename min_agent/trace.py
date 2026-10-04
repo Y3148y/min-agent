@@ -91,6 +91,12 @@ _KNOWN_EVENT_KINDS = frozenset(
 # cannot grow without bound.
 _DEFAULT_EVENTS_KEEP = 2000
 
+# Console display widths: keep a single line cheap to read, whatever the model
+# produced.  These are presentation limits, not data limits -- the JSONL file
+# always holds the full value.
+_THINK_PREVIEW_CHARS = 160
+_RESULT_PREVIEW_CHARS = 200
+
 
 @dataclass
 class TraceEvent:
@@ -205,7 +211,7 @@ class Tracer:
             )
         elif ev.kind == "reasoning":
             text = (d.get("text") or "").replace("\n", " ")
-            s.write(f"{DIM}   think: {text[:160]}{RESET}\n")
+            s.write(f"{DIM}   think: {text[:_THINK_PREVIEW_CHARS]}{RESET}\n")
         elif ev.kind == "tool_call":
             icon = f"{GREEN}ok{RESET}" if d.get("ok") else f"{RED}err{RESET}"
             s.write(
@@ -214,7 +220,7 @@ class Tracer:
             )
         elif ev.kind == "tool_result":
             preview = (d.get("preview") or "").replace("\n", " ")
-            s.write(f"{DIM}   {preview[:200]}{RESET}\n")
+            s.write(f"{DIM}   {preview[:_RESULT_PREVIEW_CHARS]}{RESET}\n")
         elif ev.kind == "memory_recall":
             hits = d.get("hits") or []
             if hits:

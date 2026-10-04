@@ -29,6 +29,11 @@ from .llm import LLMRequest
 from . import textutil
 from .paths import atomic_write_text
 
+# Cap on the extraction prompt's session tail.  Enough recent turns for context,
+# bounded so a long-lived window can never pour its whole transcript into every
+# extraction call.
+_TAIL_MAX_CHARS = 8000
+
 # Every durable-fact example that appears in the prompts, the README and the
 # tool descriptions.  The gate must accept all of them -- the test that pins
 # this lives in test_memory.py, so a tightening rule cannot silently break the
@@ -328,7 +333,7 @@ def _tail_as_text(messages: list[dict], *, limit: int) -> str:
         if count >= limit:
             break
     joined = "\n".join(reversed(out))
-    return joined[-8000:]
+    return joined[-_TAIL_MAX_CHARS:]
 
 
 def _parse_str_list(text: str) -> list[str]:
