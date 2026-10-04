@@ -199,3 +199,27 @@ def test_direct_eviction_keeps_tool_pairs_together():
     assert _alternating(messages)
     assert _pairs_intact(messages)
     assert len(messages) < len(saved)
+
+
+def test_mechanical_eviction_note_reaches_the_trace(tmp_path):
+    """Regression: _persist_compacted took a ``note`` it never used, so a
+    mechanical eviction was invisible in the trace.  The note must surface as a
+    ``compact``/``mechanical`` event."""
+    from min_agent.trace import Tracer
+
+    messages = _with_tools(3)
+    session = _mk_session(messages, tmp_path)
+    with Tracer("w-ctx", traces_root=tmp_path / "traces", console=False) as trace:
+        ok = compact_messages(
+            session,
+            budget=1,
+            keep_recent=2,
+            summary_max=200,
+            compactor=None,
+            system_overhead=100,
+            trace=trace,
+        )
+    assert ok is True
+    compact_events = [ev for ev in trace.events if ev.kind == "compact"]
+    assert any(ev.data.get("mechanical") is True for ev in compact_events)
+    assert any(ev.data.get("note") == "evicted oldest complete turns" for ev in compact_events)

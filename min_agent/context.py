@@ -152,7 +152,7 @@ def compact_messages(
     if not middle:
         mechanical = _mechanical_eviction(messages, budget, system_overhead)
         if mechanical:
-            _persist_compacted(session, "evicted oldest complete turns")
+            _persist_compacted(session, "evicted oldest complete turns", trace=trace)
         return True
 
     middle_text = _messages_to_text(middle)
@@ -168,7 +168,7 @@ def compact_messages(
     if not summary:  # summariser unavailable or produced nothing -> mechanical fallback
         mechanical = _mechanical_eviction(messages, budget, system_overhead)
         if mechanical:
-            _persist_compacted(session, "evicted oldest complete turns")
+            _persist_compacted(session, "evicted oldest complete turns", trace=trace)
         return True
 
     # Merge the summary into the anchor user message.  A *new* user message
@@ -297,8 +297,10 @@ def _mechanical_eviction(messages: list[dict], budget: int, overhead: int) -> bo
     return dropped_any and len(messages) != original_len
 
 
-def _persist_compacted(session: Session, note: str) -> None:
+def _persist_compacted(session: Session, note: str, trace=None) -> None:
     session._rewrite_jsonl()  # compacted in-memory list becomes the new truth
+    if trace is not None:
+        trace.emit("compact", mechanical=True, note=note)
 
 
 def _trunc(text: Any, n: int) -> str:
