@@ -124,6 +124,52 @@ def test_created_window_reloads_real_user(cfg):
     assert reloaded.meta.user == "bob"
 
 
+def test_corrupt_meta_degrades_to_defaults(cfg):
+    """Regression: SessionMeta(**json.loads(...)) crashed the whole window on a
+    torn meta.json.  MemoryStore already tolerated this; session and the
+    `sessions` listing must do the same."""
+    import json as _json
+    from min_agent.session import Session
+
+    node = cfg.sessions_root / "alice" / "torn"
+    node.mkdir(parents=True)
+    node.joinpath("meta.json").write_text("{ not json", encoding="utf-8")
+    s = Session.load(node)
+    assert s.meta.id == "torn"
+    assert s.meta.user == "default"
+
+    # forward-compatible: extra keys are tolerated, missing ones default
+    node.joinpath("meta.json").write_text(
+        _json.dumps({"id": "torn", "user": "alice", "future_field": 123}),
+        encoding="utf-8",
+    )
+    s = Session.load(node)
+    assert s.meta.user == "alice"
+
+
+def test_list_sessions_skips_a_corrupt_meta(cfg):
+    import json as _json
+    from min_agent.paths import safe_segment
+
+    store = SessionStore(cfg.sessions_root)
+    good = store.open("alice", "good", create=True)
+    good.close()
+    user_dir = cfg.sessions_root / safe_segment("alice")
+    (user_dir / "torn2").mkdir(parents=True)
+    (user_dir / "torn2" / "meta.json").write_text("{ nope", encoding="utf-8")
+    (user_dir / "badstr").mkdir(parents=True)
+    (user_dir / "badstr" / "meta.json").write_text(
+        _json.dumps({"id": "badstr", "user": "alice", "updated_at": "yesterday"}),
+        encoding="utf-8",
+    )
+    rows = store.list_sessions("alice")
+    ids = [r["id"] for r in rows]
+    assert "good" in ids
+    assert "torn2" not in ids  # unreadable json is skipped, not a crash
+    assert "badstr" in ids  # readable but sloppy -> kept
+    assert all(isinstance(r["updated_at"], (int, float)) for r in rows)
+
+
 # --------------------------------------------------------------------------- #
 # repair: transcript must stay a valid alternating sequence
 # --------------------------------------------------------------------------- #

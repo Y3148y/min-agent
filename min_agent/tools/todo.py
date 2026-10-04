@@ -51,7 +51,14 @@ class TodoStore:
             # is a convenience, the conversation is the product.
             self.items = []
             return
-        self.items = [TodoItem(**row) for row in raw if isinstance(row, dict)]
+        self.items = []
+        for row in raw:
+            if not isinstance(row, dict) or "id" not in row or "text" not in row:
+                continue  # a row from another schema -- skip, don't crash
+            try:
+                self.items.append(TodoItem(**row))
+            except TypeError:
+                continue  # a future/partial row -- keep the rest of the list
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

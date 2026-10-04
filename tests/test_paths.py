@@ -295,6 +295,26 @@ def test_add_still_allows_distinct_items_and_keeps_ids_unique(tmp_path):
     assert len(store.items) == 2
 
 
+def test_load_skips_a_foreign_row_without_losing_the_rest(tmp_path):
+    """Regression: TodoStore.load ran TodoItem(**row) unconditionally, so one
+    row from another schema raised TypeError and the whole list was lost."""
+    import json as _json
+    from min_agent.tools.todo import TodoStore
+
+    good = TodoStore(tmp_path / "todo.json")
+    good.add("买菜")
+    good.save()
+
+    data = _json.loads((tmp_path / "todo.json").read_text(encoding="utf-8"))
+    data.insert(0, {"not": "a todo row"})
+    (tmp_path / "todo.json").write_text(
+        _json.dumps(data, ensure_ascii=False), encoding="utf-8"
+    )
+
+    store = TodoStore(tmp_path / "todo.json")
+    assert [i.text for i in store.items] == ["买菜"]
+
+
 def test_out_of_range_limits_are_reported_by_name(monkeypatch):
     """Regression: MAX_TURNS=0 made range(1, 1) empty and the agent answered
     nothing at all, with no error anywhere.  Zero and negative were accepted

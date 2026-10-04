@@ -179,7 +179,17 @@ def _read_meta(node_dir: Path) -> SessionMeta:
     path = node_dir / "meta.json"
     if not path.exists():
         return SessionMeta(id=node_dir.name, user="default")
-    return SessionMeta(**json.loads(path.read_text(encoding="utf-8")))
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or "id" not in data or "user" not in data:
+            raise ValueError("meta.json has no identity")
+        fields = SessionMeta.__dataclass_fields__
+        # Extra keys from a newer version are tolerated; a missing/renamed
+        # field or a corrupt file degrades to defaults instead of killing the
+        # window (the worst case is a stale turn counter, not a dead window).
+        return SessionMeta(**{k: data[k] for k in fields if k in data})
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError, ValueError, TypeError):
+        return SessionMeta(id=node_dir.name, user="default")
 
 
 def _json_message(message: dict[str, Any]) -> dict[str, Any]:

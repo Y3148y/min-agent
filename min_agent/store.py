@@ -86,9 +86,17 @@ class SessionStore:
                 continue
             import json
 
-            row = json.loads(meta.read_text(encoding="utf-8"))
+            try:
+                data = json.loads(meta.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+                continue  # a torn/corrupt meta must not take down `sessions`
+            if not isinstance(data, dict) or "id" not in data:
+                continue
+            row = dict(data)
             row["user"] = user
             row["dir"] = str(node)
+            updated = row.get("updated_at", 0)
+            row["updated_at"] = updated if isinstance(updated, (int, float)) else 0
             rows.append(row)
         rows.sort(key=lambda r: r.get("updated_at", 0), reverse=True)
         return rows
