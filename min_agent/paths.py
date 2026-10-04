@@ -189,7 +189,12 @@ class FileLock:
         if self._fh is not None:
             raise RuntimeError(f"lock already held: {self.path}")
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        fh = open(self.path, "a+b")
+        # r+b, not a+b: append mode puts every write at EOF no matter where we
+        # seeked, so the owner stamp used to grow the file by one record per
+        # takeover and _busy_message kept reading the *first* caller.  A
+        # read/write handle honours seek, so the stamp overwrites in place.
+        fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o666)
+        fh = os.fdopen(fd, "r+b")
         try:
             fh.seek(0, os.SEEK_END)
             if fh.tell() == 0:
@@ -224,10 +229,19 @@ class FileLock:
     def _stamp_owner(self) -> None:
         """Record who holds it, so the loser's error message can say who won."""
         assert self._fh is not None
+        old = self._fh.tell()
+        # Fixed record width, so the next takeover overwrites it in place and
+        # the file never grows; _busy_message reads it back without locking.
+        # _OWNER_WIDTH counts byte 0 too, so the stamp itself is 63 bytes wide.
+        target = _OWNER_OFFSET + _OWNER_WIDTH - 1
+        self._fh.seek(0, os.SEEK_END)
+        if self._fh.tell() < target:
+            os.ftruncate(self._fh.fileno(), target)
         who = f"pid={os.getpid()} {self.label}".encode("utf-8", "replace")
         self._fh.seek(_OWNER_OFFSET)
         self._fh.write(who[: _OWNER_WIDTH - 1].ljust(_OWNER_WIDTH - 1, b" "))
         self._fh.flush()
+        self._fh.seek(old)
 
     def _busy_message(self) -> str:
         who = ""

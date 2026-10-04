@@ -434,6 +434,38 @@ def test_the_error_names_the_process_that_won(tmp_path):
         held.release()
 
 
+def test_owner_stamp_overwrites_in_place_not_append(tmp_path):
+    """Regression: the lock file used to be opened in append mode, so a write
+    after a seek landed at EOF anyway, growing the file by one fixed-width
+    record per takeover, while _busy_message read the record at byte 1 -- the
+    *first* owner, not the current one.  The file must stay one record wide.
+    """
+    lock_path = tmp_path / "w.lock"
+    paths.FileLock(lock_path, label="first").acquire().release()
+    paths.FileLock(lock_path, label="second").acquire().release()
+    raw = lock_path.read_bytes()
+    assert len(raw) == 1 + 63, f"lock file grew to {len(raw)} bytes"
+    assert raw[0] == 0
+    assert b"second" in raw, "the newest stamp must be the one in place"
+
+
+def test_busy_message_names_the_current_holder_not_the_first(tmp_path):
+    """Under the append-mode bug the stamp read by _busy_message was always the
+    first process ever to touch the file, so the 'held by' hint pointed at a
+    window that may already be long gone."""
+    lock_path = tmp_path / "w.lock"
+    paths.FileLock(lock_path, label="old-and-gone").acquire().release()
+    current = paths.FileLock(lock_path, label="current-window").acquire()
+    try:
+        with pytest.raises(paths.LockBusy) as excinfo:
+            paths.FileLock(lock_path, label="loser", timeout=0.05, poll=0.01).acquire()
+        message = str(excinfo.value)
+        assert "current-window" in message
+        assert "old-and-gone" not in message
+    finally:
+        current.release()
+
+
 def test_the_lock_does_not_block_readers(tmp_path):
     """Only writers serialise.  `min-agent sessions` and `min-agent trace` read
     a live window's files, and atomic replacement already makes that safe."""
