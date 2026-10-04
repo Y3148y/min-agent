@@ -34,6 +34,15 @@ def test_unicode_window_names_survive_sanitising(tmp_path):
         assert tr.path.name == "张三.周末规划.jsonl"
 
 
+def test_unknown_emit_kind_is_rejected():
+    """The trace contract is enforced at the call site: a typo'd kind must be a
+    loud ValueError, not a silent JSONL line the console renderer ignores."""
+    tracer = Tracer("w", console=False)
+    with pytest.raises(ValueError, match="unknown trace event kind"):
+        tracer.emit("finale", text="boom")
+    tracer.close()
+
+
 @pytest.mark.parametrize(
     "user, session_id",
     [

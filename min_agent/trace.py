@@ -3,6 +3,34 @@
 Every interesting thing the runtime does emits a :class:`TraceEvent`. The file
 is the durable record (post-mortem debugging, and the tests use it to assert on
 *what was actually sent to the model*), the console renderer is the live view.
+
+Event contract
+--------------
+``emit(kind, **data)`` accepts exactly the kinds below.  Anything else raises
+``ValueError`` at the call site, so a typo is caught at once instead of writing
+an unrenderable line that only shows up as a blank entry in the console.
+
+===========================  ================================================
+kind                         data fields
+===========================  ================================================
+user                         text
+llm_request                  continuation, messages, est_tokens, tools
+llm_response                 latency_ms, input_tokens, output_tokens,
+                             stop_reason, blocks
+reasoning                    text
+tool_call                    name, args, ok, latency_ms
+tool_result                  preview
+memory_recall                hits
+memory_store                 text
+compact                      before, after, est_tokens, summary_chars |
+                             mechanical, note
+error                        message
+warning                      message
+final                        text
+===========================  ================================================
+
+``stream(kind, delta)`` only ever carries ``"text"`` deltas; the final event is
+still a ``final``/``text`` :class:`TraceEvent` with the assembled answer.
 """
 
 from __future__ import annotations
@@ -37,6 +65,25 @@ YELLOW = _c("\033[33m")
 BLUE = _c("\033[34m")
 CYAN = _c("\033[36m")
 RESET = _c("\033[0m")
+
+
+# The one source of truth for what ``emit`` accepts; see the module docstring.
+_KNOWN_EVENT_KINDS = frozenset(
+    {
+        "user",
+        "llm_request",
+        "llm_response",
+        "reasoning",
+        "tool_call",
+        "tool_result",
+        "memory_recall",
+        "memory_store",
+        "compact",
+        "error",
+        "warning",
+        "final",
+    }
+)
 
 
 # How many events to keep in RAM for `of_kind`/`last`.  Generous enough that a
@@ -101,6 +148,11 @@ class Tracer:
 
     # -- emit ---------------------------------------------------------------
     def emit(self, kind: str, **data: Any) -> TraceEvent:
+        if kind not in _KNOWN_EVENT_KINDS:
+            raise ValueError(
+                f"unknown trace event kind: {kind!r}; "
+                f"known kinds: {', '.join(sorted(_KNOWN_EVENT_KINDS))}"
+            )
         with self._lock:
             self._seq += 1
             ev = TraceEvent(
