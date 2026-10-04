@@ -136,7 +136,11 @@ class Agent:
         steps = 0
         try:
             for turn in range(1, self.config.max_turns + 1):
-                if recent_calls and recent_calls.count(recent_calls[-1]) >= self.config.max_repeat_call:
+                # Loop guard: "the same call, back to back".  Counting the
+                # signature's total occurrences (old code) tripped on a benign
+                # B after A,B,A,B, while A,B,A,B,? escaped unnoticed.  Only a
+                # run of identical tail signatures is a loop.
+                if recent_calls and _consecutive_tail(recent_calls) >= self.config.max_repeat_call:
                     self.trace.emit("warning", message="tool calls looping on identical args")
                     result.guard_aborted = True
                     result.text = self._wrap_up(recent_calls)
@@ -403,6 +407,19 @@ class Agent:
 def _strip_thinking(content: list[dict]) -> list[dict]:
     """Thinking blocks are reasoning gold but cheap noise in the transcript."""
     return [b for b in content if b.get("type") != "thinking"]
+
+
+def _consecutive_tail(recent_calls: list[str]) -> int:
+    """Length of the run of identical signatures at the end of the call log."""
+    if not recent_calls:
+        return 0
+    last = recent_calls[-1]
+    n = 0
+    for i in range(len(recent_calls) - 1, -1, -1):
+        if recent_calls[i] != last:
+            break
+        n += 1
+    return n
 
 
 def _is_tool_results_message(message: dict) -> bool:

@@ -154,6 +154,34 @@ def test_repeat_call_guard_aborts(agent, llm):
     assert "循环" in result.text
 
 
+def test_repeat_guard_requires_consecutive_not_global_repeats(agent, llm):
+    """Regression: the guard counted *total* occurrences of the last signature,
+    so A,B,A,B tripped it (B repeats with A between them) and genuinely
+    repeated calls interleaved with a different tool were miscalled a loop.
+    Only a consecutive tail run counts."""
+    from min_agent.loop import _consecutive_tail
+
+    assert _consecutive_tail(["a", "a"]) == 2
+    assert _consecutive_tail(["a", "b", "a"]) == 1
+    assert _consecutive_tail(["a", "b", "a", "b"]) == 1  # A,B,A,B escapes
+    assert _consecutive_tail([]) == 0
+
+
+def test_interleaved_tools_do_not_trip_the_guard(agent, llm):
+    """Two tools alternating on purpose (probe, then act) must not behave as a
+    loop: with windowed counting the alternating sequence reaches its step cap,
+    not the repeat guard."""
+    llm.script = [
+        {"content": [tool_block("a", "calculator", expression="1+1")], "stop_reason": "tool_use"},
+        {"content": [tool_block("b", "calculator", expression="2+2")], "stop_reason": "tool_use"},
+        {"content": [tool_block("a", "calculator", expression="1+1")], "stop_reason": "tool_use"},
+        {"content": [text_block("交替完成。")], "stop_reason": "end_turn"},
+    ]
+    result = agent.run_turn("交替调用")
+    assert result.guard_aborted is False
+    assert "交替完成" in result.text
+
+
 def test_max_tokens_truncation_triggers_continuation(agent, llm):
     llm.script = [
         {"content": [think_block("先想"), text_block("最后的")], "stop_reason": "max_tokens"},
