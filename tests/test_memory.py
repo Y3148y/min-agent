@@ -235,3 +235,24 @@ def test_extract_facts_tolerates_garbage(tmp_path):
 def test_extract_facts_skips_empty_session(tmp_path):
     llm = ScriptedLLM([{"content": [text_block("[]")], "stop_reason": "end_turn"}])
     assert extract_facts([], llm) == []
+
+
+def test_extract_facts_reads_only_the_users_turns(tmp_path):
+    """Assistant text (including a bot guessing a fact back at the user) must
+    never be transcribed into memory.  The curator prompt gets the user's side
+    of the conversation and nothing else."""
+    llm = ScriptedLLM(
+        [{"content": [text_block("[]")], "stop_reason": "end_turn"}]
+    )
+    messages = [
+        {"role": "user", "content": "我喜欢JS"},
+        {"role": "assistant", "content": "好的，我猜你肯定还喜欢喝奶茶。"},
+        {"role": "user", "content": "讨厌推销电话"},
+        {"role": "assistant", "content": "记住了，你住在北京。"},
+    ]
+    assert extract_facts(messages, llm, max_facts=8) == []
+    prompt = llm.requests[0].messages[0]["content"]
+    assert "我喜欢JS" in prompt
+    assert "讨厌推销电话" in prompt
+    assert "喜欢喝奶茶" not in prompt
+    assert "你住在北京" not in prompt

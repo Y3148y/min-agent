@@ -321,9 +321,11 @@ def extract_facts(messages: list[dict], llm: Any, *, max_facts: int = 8) -> list
     tail_text = _tail_as_text(messages, limit=60)
     if not tail_text:
         return []
+    prompt = _EXTRACT_PROMPT.format(
+        examples="、".join(_DOCUMENTED_FACTS), max=max_facts)
+    prompt += "\n\nSession tail (user's turns only):\n" + tail_text
     request = LLMRequest(
-        messages=[{"role": "user", "content": _EXTRACT_PROMPT.format(
-            examples="、".join(_DOCUMENTED_FACTS), max=max_facts)}],
+        messages=[{"role": "user", "content": prompt}],
         max_tokens=512,
         temperature=0,
     )
@@ -335,16 +337,28 @@ def extract_facts(messages: list[dict], llm: Any, *, max_facts: int = 8) -> list
 
 
 def _tail_as_text(messages: list[dict], *, limit: int) -> str:
+    """The curator reads the *user's* turns only.
+
+    Facts must come from what the user actually said; assistant text (including
+    an answer that says "你住在北京" only because the bot guessed it back) must
+    never be transcribed into long-term memory.
+    """
     out: list[str] = []
-    for m in messages[-limit:]:
+    count = 0
+    for m in reversed(messages):
+        if m.get("role") != "user":
+            continue
         content = m.get("content")
         if isinstance(content, str):
-            out.append(f"[{m['role']}] {content}")
+            out.append(f"[user] {content}")
         elif isinstance(content, list):
             for block in content:
                 if isinstance(block, dict) and block.get("type") == "text":
-                    out.append(f"[{m['role']}] {block.get('text', '')}")
-    joined = "\n".join(out)
+                    out.append(f"[user] {block.get('text', '')}")
+        count += 1
+        if count >= limit:
+            break
+    joined = "\n".join(reversed(out))
     return joined[-8000:]
 
 
