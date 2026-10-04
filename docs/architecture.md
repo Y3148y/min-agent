@@ -24,8 +24,8 @@ min_agent/
 
 - **何时读取**：每个用户回合开始、模型发言之前（`loop.py` 中 `memory.recall` 先行）。
 - **放在哪里**：召回结果注入 **系统提示词** 的 `Long-term memory` 段落，而不是混进 user 回合——记忆是上下文而不是命令。
-- **何时写入**：模型主动调用 `remember` 工具（即时），以及窗口结束时对整段会话做一次 `extract_facts` 提取。
-- **写入门槛**：太短、疑似指令、疑似提问、含时间词、数值型工具输出都会被拒绝；内容做归一化去重。
+- **何时写入**：模型主动调用 `remember` 工具（即时），以及窗口结束时对整段会话做一次 `extract_facts` 提取（只取 user 回合）。
+- **写入门槛**：太短（`textutil` 有效词不足 3）、疑似提问、疑似指令、时间敏感 → 拒绝；数值型工具输出已不再误拒；内容做归一化去重。模型侧引导用的示例事实集中定义在 `min_agent/memory.py::_DOCUMENTED_FACTS`——**文档里的记忆示例必须与它保持一致**。
 - **召回方式**：关键词打分（BM25 风格），每条事实会累计命中数；TTL 90 天。
 
 ### 2. 上下文压缩防止工具对撕裂
@@ -41,6 +41,8 @@ min_agent/
 
 ### 4. 痕迹、会话与多进程
 
-- `trace.py`：每次工具调用、每次压缩、每条记忆都落 JSONL，供复盘。
-- 会话为"每窗口一目录"的纯 JSON 结构，与 SDK 无关；中断后重新加载会自动清理悬空的 `tool_use`/`tool_result` 对。
-- 每窗口一进程：`SessionStore.open` 对 `<session>/.lock` 取排它锁（锁的寿命=窗口生命周期，内核句柄随进程消亡自动释放），第二个进程打开同一窗口会得到 `LockBusy`，CLI 打印一行提示并以退出码 2 结束。同一用户的不同窗口各锁各的，可并行。
+- `trace.py`：每次工具调用、每次压缩、每条记忆都落 JSONL，供复盘。`emit` 只接受固定 kind 集合（`user / llm_request / llm_response / reasoning / tool_call / tool_result / memory_recall / memory_store / compact / error / warning / final`），未知 kind 立即 `ValueError`；每个 kind 的字段契约见 `min_agent/trace.py` 模块文档。机械压缩（摘要不可用/溢出）额外发 `compact: {mechanical: true, note}`。
+- 会话为"每窗口一目录"的纯 JSON 结构，与 SDK 无关；中断后重新加载会自动清理悬空的 `tool_use`/`tool_result` 对。meta.json / todo.json / sessions 枚举对损坏文件一律降级（不崩窗口），与 `memory.py` 的宽容加载一致。
+- 每窗口一进程：`SessionStore.open` 对 `<session>/.lock` 取排它锁（锁的寿命=窗口生命周期，内核句柄随进程消亡自动释放），第二个进程打开同一窗口会得到 `LockBusy`，CLI 打印是哪个 pid 占着并以退出码 2 结束。同一用户的不同窗口各锁各的，可并行。
+- 路径一律经 `paths.safe_segment` 净化（含 Windows 保留名 → `default`），trace 文件名与 session 目录名都从它派生。
+- 修复/审计过程的完整记录、测试钉死清单与维护须知见 `docs/REFACTOR.md`。

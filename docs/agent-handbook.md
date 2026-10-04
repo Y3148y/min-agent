@@ -33,6 +33,7 @@ min-agent --user alice tools              # 列出模型可用的工具
 - `weather` 天气查询。默认 `mock`（确定性假数据，无需联网）；在 `.env` 里设 `WEATHER_BACKEND=wttr.in` 即可切到真实 wttr.in 预报（免费、无 key），服务不可达时自动回退 mock
 - `todo` 本窗口的待办清单，支持 add/list/done/remove/clear
 - `read_docs` 读取 `docs/` 下的项目文档
+- `remember` 把一条耐存事实写入长期记忆 `.memory/<user>/facts.json`（模型侧按用户陈述原样保存；写入门槛会过滤掉提问/指令/琐碎内容，示例见 `memory.py::_DOCUMENTED_FACTS`）
 
 ## 数据存放（仓库根目录下）
 
