@@ -36,9 +36,30 @@ _EN_STOP = {
     "我", "你", "的", "了", "是", "吧", "吗", "呢", "个",
 }
 
-# Statements that are almost never durable facts.
-_TEMPORAL = ("今天", "昨天", "刚才", "明天", "稍后", "现在", "今早", "今晚", "上周", "下周", "刚刚")
-_ACTIONS = ("帮我", "请", "记一下", "查一下", "算一下", "搜一下", "写一下")
+# Every durable-fact example that appears in the prompts, the README and the
+# tool descriptions.  The gate must accept all of them -- the test that pins
+# this lives in test_memory.py, so a tightening rule cannot silently break the
+# exact examples we hand the model.
+_DOCUMENTED_FACTS = (
+    "我住在北京",
+    "喜欢BA风格",
+    "不要用英文缩写",
+    "讨厌推销电话",
+    "我是后端实习生",
+    "周一上午开会",
+    "在准备面试",
+    "项目下周五必须上线",
+    "讨厌被叫英文名",
+)
+
+# Statements that are almost never durable facts because they are anchored to
+# *now*.  Recurring schedule words (上周/下周/本周/周X) are deliberately NOT
+# here: "项目下周五必须上线" is exactly the standing commitment memory should
+# keep, and it used to be rejected for containing 下周.
+_NOW_TEMPORAL = ("今天", "今日", "昨天", "明天", "后天", "大后天", "刚才", "刚刚", "现在", "此刻", "今晚", "今早", "目前")
+_ACTION_PREFIXES = ("帮我", "请", "记一下", "查一下", "算一下", "搜一下", "写一下", "记得", "记住", "提醒", "标记")
+_QUESTION_WORDS = ("吗", "嘛", "呢", "吧", "么", "啊", "呀")
+_QUESTION_LEADS = ("什么", "怎么", "怎样", "如何", "为什么", "为啥", "哪", "几")
 
 
 def _tokens(text: str) -> list[str]:
@@ -62,6 +83,29 @@ def _is_cjk(tok: str) -> bool:
 
 def _normalise(text: str) -> str:
     return re.sub(r"[\s\W_]+", "", text.lower())
+
+
+def _meaningful_units(text: str) -> int:
+    """Token budget for the length gate: CJK characters plus separate ASCII
+    words.  Pure punctuation, spaces and stopwords contribute nothing, so
+    ``CAFE`` and ``好的`` stay below the keep bar and ``在准备面试`` clears it."""
+    cjk = sum(1 for ch in text if _is_cjk(ch))
+    words = sum(
+        1
+        for w in _WORDS.findall(text.lower())
+        if w.isascii() and w not in _EN_STOP and len(w) > 1
+    )
+    return cjk + words
+
+
+def _looks_like_question(text: str) -> bool:
+    striped = text.strip()
+    if "?" in striped or "？" in striped:
+        return True
+    tail = striped.rstrip("。．.!！?？，, ")
+    if tail.endswith(_QUESTION_WORDS):
+        return True
+    return any(striped.startswith(w) for w in _QUESTION_LEADS)
 
 
 @dataclass
@@ -177,19 +221,25 @@ class MemoryStore:
         return f"remembered: {text}"
 
     def _gate(self, text: str) -> str:
-        """Return a rejection reason, or '' to allow storage."""
-        if len(text) < 6:
-            return "too short"
-        if not any(ch.isalpha() or "\u4e00" <= ch <= "\u9fff" for ch in text):
+        """Return a rejection reason, or '' to allow storage.
+
+        Cheap and rule-driven on purpose; the real protection is *who* feeds it
+        -- the ``remember`` tool plus an extraction job that now reads user
+        turns only, so numeric or relational numbers in a fact are no longer
+        mistaken for tool output and no numeric rule is needed.  This gate only
+        keeps obviously transient utterances (filler, questions, instructions,
+        now-relative timestamps) out of long-term memory.
+        """
+        if not any(ch.isalpha() or _is_cjk(ch) for ch in text):
             return "no meaningful content"
-        if re.search(r"\d+[.,]\d+", text):
-            return "looks like numeric tool output"
-        if any(w in text for w in _TEMPORAL):
-            return "time-sensitive"
-        if any(w in text for w in ("? ", "？", "吗", "嘛", "？")):
+        if _meaningful_units(text) < 3:
+            return "too short"
+        if _looks_like_question(text):
             return "looks like a question"
-        if any(text.strip().startswith(w) for w in _ACTIONS):
+        if any(text.strip().startswith(w) for w in _ACTION_PREFIXES):
             return "looks like an instruction"
+        if any(w in text for w in _NOW_TEMPORAL):
+            return "time-sensitive"
         return ""
 
     def _find_duplicate(self, text: str) -> MemoryItem | None:
@@ -259,9 +309,7 @@ class MemoryStore:
 _EXTRACT_PROMPT = """You are a memory curator. You are given the tail of a chat
 session. Pick out the statements that would still be true next week:
 
-- preferences and constraints ("喜欢BA风格", "不要用英文缩写", "讨厌推销电话"),
-- stable facts ("我住在北京", "我是后端实习生", "周一上午开会"),
-- long-running commitments ("在准备面试", "项目下周五必须上线").
+Examples: {examples}
 
 Maintain no more than {max} facts and ONLY from what the user actually said.
 Output a JSON array of strings, e.g. ["我住在北京"]. If nothing qualifies,
@@ -274,7 +322,8 @@ def extract_facts(messages: list[dict], llm: Any, *, max_facts: int = 8) -> list
     if not tail_text:
         return []
     request = LLMRequest(
-        messages=[{"role": "user", "content": _EXTRACT_PROMPT.format(max=max_facts)}],
+        messages=[{"role": "user", "content": _EXTRACT_PROMPT.format(
+            examples="、".join(_DOCUMENTED_FACTS), max=max_facts)}],
         max_tokens=512,
         temperature=0,
     )

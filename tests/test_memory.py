@@ -27,9 +27,31 @@ def test_gate_rejects_transient_statements(tmp_path):
     store = MemoryStore(tmp_path / "f.json")
     store.remember("用户住在北京市", "w1")  # durable -> stored
     assert len(store) == 1
-    for bad in ("好的", "帮我查一下天气", "明天8点开会", "结果是 37.5 度", "你吃饭了吗"):
+    for bad in ("好的", "帮我查一下天气", "明天8点开会", "你吃饭了吗", "BA", "我什么时候来?"):
         store.remember(bad, "w1")
     assert len(store) == 1
+
+
+def test_every_documented_example_passes_the_gate(tmp_path):
+    """The gate rejects transient utterances, but the example facts shipped in
+    the extraction prompt, the remember tool description and the README must
+    all be storable -- otherwise we teach the model facts our own gate refuses.
+    """
+    store = MemoryStore(tmp_path / "f.json")
+    for fact in memory_module._DOCUMENTED_FACTS:
+        reason = store._gate(fact)
+        assert reason == "", f"documented example rejected: {fact!r} -> {reason}"
+        store.remember(fact, "w1")
+    assert len(store) == len(memory_module._DOCUMENTED_FACTS)
+
+
+def test_numeric_facts_are_stored_not_mistaken_for_tool_output(tmp_path):
+    """A real number in a fact is not evidence of tool output (the end-of-session
+    extraction reads user turns only, so provenance is clean by construction).
+    This used to be rejected outright."""
+    store = MemoryStore(tmp_path / "f.json")
+    store.remember("我月薪 20.5k", "w1")
+    assert store.all()[0].text == "我月薪 20.5k"
 
 
 def test_dedup_by_normalised_text(tmp_path):
