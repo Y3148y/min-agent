@@ -24,6 +24,7 @@ from .errors import AgentAborted, LLMContextOverflow, LLMError, LLMTransportErro
 from .llm import LLMRequest, LLMResponse, estimate_message_tokens, estimate_tokens
 from .memory import MemoryStore, extract_facts
 from .parser import parse_response
+from .paths import safe_segment
 from .session import Session
 from .store import SessionStore
 from .tools import ToolContext, build_registry
@@ -105,7 +106,7 @@ class Agent:
         self.compactor = LLMCompactor(self.llm)
 
     def _safe_user(self) -> str:
-        return "".join(c if c.isalnum() or c in "-_" else "_" for c in self.user) or "default"
+        return safe_segment(self.user)
 
     # ------------------------------------------------------------------ #
     # Step 1 + the loop

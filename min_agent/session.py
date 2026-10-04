@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from .parser import ParsedTurn
-from .paths import atomic_write_text
+from .paths import atomic_write_text, safe_segment
 
 
 @dataclass
@@ -75,7 +75,7 @@ class Session:
     def create(cls, session_id: str, user: str, node_dir: Path, *, lock=None) -> "Session":
         # Sanitise: the id later becomes a directory name, so it must not be a
         # path escape or contain Windows-reserved characters.
-        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in session_id).strip() or "default"
+        safe = safe_segment(session_id)
         node_dir.mkdir(parents=True, exist_ok=True)
         session = cls(SessionMeta(id=safe, user=user), node_dir, lock=lock)
         # Persist the meta *now*, not on first append: list_sessions skips any

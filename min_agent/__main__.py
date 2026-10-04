@@ -166,9 +166,13 @@ def _cmd_sessions(store, args) -> int:
 
 
 def _cmd_trace(config, args) -> int:
+    from .paths import safe_segment
     from .trace import read_trace
 
-    path = config.traces_root / f"{args.user}.{args.session}.jsonl"
+    # The tracer sanitises when it *writes*; the reader must apply the same
+    # rule or a raw id (../.., windows device name) simply fails to find the
+    # file it just created.
+    path = config.traces_root / f"{safe_segment(args.user)}.{safe_segment(args.session)}.jsonl"
     if not path.exists():
         _print(f"[min-agent] no trace at {path.name} for user {args.user!r} / session {args.session!r}.")
         return 1

@@ -41,6 +41,30 @@ def test_unicode_names_pass_through_untouched():
     assert safe_segment("张三") == "张三"
 
 
+def test_windows_reserved_device_names_are_neutralised():
+    """Regression: CON/PRN/AUX/NUL/COM1-9/LPT1-9 are valid Unix-ish names and
+    pass ``isalnum`` untouched, but on Windows mkdir("CON") fails and the whole
+    window becomes unopenable.  They must collapse to the default, like the
+    empty/unsafe cases do."""
+    for name in ("CON", "con", "Prn", "aux", "NUL", "COM1", "lpt9"):
+        assert safe_segment(name) == "default", name
+    assert safe_segment("console") == "console"  # not a device name
+    assert safe_segment("commit") == "commit"
+    assert safe_segment("COM10") == "COM10"  # past the reserved range
+
+
+def test_delegating_callers_no_longer_inline_their_own_sanitiser():
+    """loop._safe_user and Session.create used to copy the sanitise rule; both
+    must now go through the single implementation in paths."""
+    import inspect
+
+    from min_agent.loop import Agent
+    from min_agent.session import Session
+
+    assert "isalnum" not in inspect.getsource(Agent._safe_user)
+    assert "isalnum" not in inspect.getsource(Session.create)
+
+
 # --------------------------------------------------------------------------- #
 # ensure_within
 # --------------------------------------------------------------------------- #

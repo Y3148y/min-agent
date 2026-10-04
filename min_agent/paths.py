@@ -27,6 +27,13 @@ from pathlib import Path
 from typing import IO
 
 
+_RESERVED_DEVICE = {
+    "aux", "con", "nul", "prn",
+    *(f"com{n}" for n in range(1, 10)),
+    *(f"lpt{n}" for n in range(1, 10)),
+}
+
+
 def safe_segment(segment: str) -> str:
     """Reduce ``segment`` to a single harmless path component.
 
@@ -34,10 +41,21 @@ def safe_segment(segment: str) -> str:
     Windows drive/UNC forms all collapse; an empty result becomes ``default``.
 
     ``str.isalnum`` is Unicode-aware, so CJK window names survive intact --
-    that is deliberate, not an oversight.
+    that is deliberate, not an oversight.  Windows device names (CON, PRN,
+    NUL, AUX, COM1..9, LPT1..9, case-insensitive) are neutralised too, because
+    those would otherwise collide with the filesystem and could make the whole
+    window unopenable.
+
+    This is the *single* sanitizer for user/session ids; ``loop``, ``session``
+    and ``__main__`` delegate here rather than inlining their own copy.
     """
     cleaned = "".join(c if c.isalnum() or c in "-_" else "_" for c in segment)
-    return cleaned or "default"
+    cleaned = cleaned.strip()
+    if not cleaned:
+        return "default"
+    if cleaned.lower() in _RESERVED_DEVICE:
+        return "default"
+    return cleaned
 
 
 def ensure_within(root: Path, path: Path) -> Path:
