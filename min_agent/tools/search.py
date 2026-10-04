@@ -1,18 +1,20 @@
 """``search`` -- a mock web search.
 
 Mocked on purpose (the brief allows it) but *honestly* mocked: it is a real
-BM25-lite ranker over a small fixed corpus, so the model gets back something
-shaped like search results -- ranked, snippet-truncated, with a source URL and
-a date -- rather than a fixed string.  That is what makes the loop behaviour
-(did the snippet help? does it need a follow-up search?) testable.
+BM25 ranker over a small fixed corpus, so the model gets back something shaped
+like search results -- ranked, snippet-truncated, with a source URL and a date
+-- rather than a fixed string.  That is what makes the loop behaviour (did the
+snippet help? does it need a follow-up search?) testable.
 """
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Annotated, Any
 
 from ..errors import ToolError
+from .. import textutil
 from .base import tool
 
 # A deliberately small, stable corpus.  Swap this module out for a real HTTP
@@ -112,50 +114,34 @@ _CORPUS: list[dict[str, Any]] = [
     },
 ]
 
-_TOKEN = re.compile(r"[a-z0-9]+|[一-鿿]")
-_STOP = {
-    "the", "a", "an", "of", "and", "or", "to", "in", "on", "for", "is", "are", "how", "what",
-    "with", "that", "this", "it", "as", "by", "at", "from", "be", "do", "does", "can", "you",
-    "我", "的", "了", "是", "在", "和", "与", "吗", "呢", "吧", "个", "请", "帮", "一下", "怎么",
-    "什么", "如何", "一个",
-}
-
-
-def _tokens(text: str) -> list[str]:
-    out: list[str] = []
-    for tok in _TOKEN.findall(text.lower()):
-        if tok in _STOP:
-            continue
-        out.extend(_cjk_bigrams(tok) if _is_cjk(tok) else [tok])
-    return out
-
-
-def _is_cjk(tok: str) -> bool:
-    return any("一" <= ch <= "鿿" for ch in tok)
-
-
-def _cjk_bigrams(tok: str) -> list[str]:
-    if len(tok) == 1:
-        return [tok]
-    return [tok[i : i + 2] for i in range(len(tok) - 1)]
+_K1 = 1.5
+_B = 0.75
 
 
 def search_corpus(query: str, limit: int = 3) -> list[dict[str, Any]]:
-    """Rank the corpus against ``query``. Exposed for tests."""
-    q = _tokens(query)
+    """Rank the corpus against ``query`` with BM25. Exposed for tests."""
+    q = textutil.tokenize(query)
     if not q:
         return []
     qset = set(q)
+    # Haystack is title-twice + body, which weights the title like previous
+    # versions of this tool did.
+    docs = [(doc, textutil.tokenize(f"{doc['title']} {doc['title']} {doc['text']}")) for doc in _CORPUS]
+    n = len(docs)
+    avgdl = sum(len(toks) for _, toks in docs) / n
     scored: list[tuple[float, dict[str, Any]]] = []
-    for doc in _CORPUS:
-        haystack = _tokens(f"{doc['title']} {doc['title']} {doc['text']}")  # title weighted x2
-        if not haystack:
-            continue
-        overlap = sum(1 for t in haystack if t in qset)
-        if overlap == 0:
-            continue
-        norm = overlap / (len(haystack) ** 0.5 + 1)
-        scored.append((norm, doc))
+    for doc, hay in docs:
+        score = 0.0
+        for term in qset:
+            tf = hay.count(term)
+            if not tf:
+                continue
+            df = sum(1 for _, other in docs if term in other)
+            idf = math.log(1 + (n - df + 0.5) / (df + 0.5))
+            dl = len(hay)
+            score += idf * (tf * (_K1 + 1)) / (tf + _K1 * (1 - _B + _B * dl / avgdl))
+        if score > 0:
+            scored.append((score, doc))
     scored.sort(key=lambda pair: -pair[0])
     return [
         {
@@ -170,16 +156,31 @@ def search_corpus(query: str, limit: int = 3) -> list[dict[str, Any]]:
 
 
 def _snippet(text: str, qset: set[str], width: int = 220) -> str:
-    toks = _tokens(text)
-    if not toks:
-        return text[:width]
-    hit = next((i for i, t in enumerate(toks) if t in qset), None)
+    hit = _first_hit(text, qset)
     if hit is None:
         return text[:width] + ("..." if len(text) > width else "")
-    # 1 token == 1 char for our corpus, so a token window is a char window.
+    # A token window in the old code was treated as a char window; tokens are
+    # words (avg ~6 chars), so the snippet started far before the actual hit.
+    # Now we slice around the hit's real character offset.
     start = max(0, hit - width // 3)
     end = min(len(text), start + width)
     return ("..." if start > 0 else "") + text[start:end].strip() + ("..." if end < len(text) else "")
+
+
+def _first_hit(text: str, qset: set[str]) -> int | None:
+    """Character offset of the earliest query term in ``text`` (for the
+    snippet); None if nothing matches."""
+    low = text.lower()
+    best: int | None = None
+    for term in qset:
+        if textutil.is_cjk(term):
+            pos = low.find(term)
+        else:
+            m = re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", low)
+            pos = m.start() if m else -1
+        if pos >= 0 and (best is None or pos < best):
+            best = pos
+    return best
 
 
 @tool(tags=("knowledge",))

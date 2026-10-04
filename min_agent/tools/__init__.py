@@ -13,11 +13,11 @@ from pathlib import Path
 from typing import Annotated, Any, Callable
 
 from ..config import Config
+from . import search  # noqa: F401  -- the submodule, not its ToolSpec
 from .base import ToolCall, ToolSpec, tool
 from .calculator import calculator
 from .read_docs import build_read_docs_tool
 from .registry import ToolRegistry
-from .search import search
 from .todo import TodoStore, build_todo_tool, make_todo_tool
 from .weather import make_weather_tool, weather
 
@@ -93,7 +93,7 @@ def build_registry(ctx: ToolContext, memory: Any = None) -> tuple[ToolRegistry, 
     specs: list[ToolSpec] = [
         calculator,
         make_weather_tool(ctx.config.weather_backend),  # mock (default) or wttr.in
-        search,
+        search.search,
         build_read_docs_tool(ctx.config.docs_dir),
         todo_spec,
     ]

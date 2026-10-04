@@ -17,6 +17,7 @@ from typing import Annotated, Any, Callable
 
 from ..errors import ToolError
 from ..paths import atomic_write_text
+from .. import textutil
 from .base import ToolSpec, tool
 
 _STATUS = ("pending", "done")
@@ -192,6 +193,6 @@ def make_todo_tool(path: Path) -> tuple[ToolSpec, TodoStore]:
 
 
 def _normalise(text: str) -> str:
-    """Same key MemoryStore uses for its dedup, so the two agree on what counts
-    as "the same text"."""
-    return re.sub(r"[\s\W_]+", "", text.lower())
+    """Same key as textutil.normalise, which MemoryStore uses for its dedup, so
+    the two agree on what counts as "the same text"."""
+    return textutil.normalise(text)

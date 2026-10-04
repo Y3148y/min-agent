@@ -19,7 +19,6 @@ answers to "when do you recall, and where do you put it?":
 from __future__ import annotations
 
 import json
-import re
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -27,14 +26,8 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .llm import LLMRequest
+from . import textutil
 from .paths import atomic_write_text
-
-_WORDS = re.compile(r"[a-z0-9]+|[一-鿿]")
-_EN_STOP = {
-    "the", "a", "an", "is", "are", "you", "i", "me", "my", "to", "of", "in",
-    "on", "at", "for", "and", "or", "with", "it", "this", "that", "do", "be",
-    "我", "你", "的", "了", "是", "吧", "吗", "呢", "个",
-}
 
 # Every durable-fact example that appears in the prompts, the README and the
 # tool descriptions.  The gate must accept all of them -- the test that pins
@@ -62,38 +55,15 @@ _QUESTION_WORDS = ("吗", "嘛", "呢", "吧", "么", "啊", "呀")
 _QUESTION_LEADS = ("什么", "怎么", "怎样", "如何", "为什么", "为啥", "哪", "几")
 
 
-def _tokens(text: str) -> list[str]:
-    out: list[str] = []
-    for tok in _WORDS.findall(text.lower()):
-        if tok in _EN_STOP:
-            continue
-        if len(tok) == 1 and tok.isascii():
-            continue
-        out.extend(_bigrams(tok) if _is_cjk(tok) and len(tok) > 1 else [tok])
-    return out
-
-
-def _bigrams(tok: str) -> list[str]:
-    return [tok[i : i + 2] for i in range(len(tok) - 1)]
-
-
-def _is_cjk(tok: str) -> bool:
-    return any("\u4e00" <= ch <= "\u9fff" for ch in tok)
-
-
-def _normalise(text: str) -> str:
-    return re.sub(r"[\s\W_]+", "", text.lower())
-
-
 def _meaningful_units(text: str) -> int:
     """Token budget for the length gate: CJK characters plus separate ASCII
     words.  Pure punctuation, spaces and stopwords contribute nothing, so
     ``CAFE`` and ``好的`` stay below the keep bar and ``在准备面试`` clears it."""
-    cjk = sum(1 for ch in text if _is_cjk(ch))
+    cjk = sum(1 for ch in text if textutil.is_cjk(ch))
     words = sum(
         1
-        for w in _WORDS.findall(text.lower())
-        if w.isascii() and w not in _EN_STOP and len(w) > 1
+        for w in textutil.WORD.findall(text.lower())
+        if w.isascii() and w not in textutil.STOP and len(w) > 1
     )
     return cjk + words
 
@@ -230,7 +200,7 @@ class MemoryStore:
         keeps obviously transient utterances (filler, questions, instructions,
         now-relative timestamps) out of long-term memory.
         """
-        if not any(ch.isalpha() or _is_cjk(ch) for ch in text):
+        if not any(ch.isalpha() or textutil.is_cjk(ch) for ch in text):
             return "no meaningful content"
         if _meaningful_units(text) < 3:
             return "too short"
@@ -243,9 +213,9 @@ class MemoryStore:
         return ""
 
     def _find_duplicate(self, text: str) -> MemoryItem | None:
-        needle = _normalise(text)
+        needle = textutil.normalise(text)
         for item in self._items:
-            if _normalise(item.text) == needle:
+            if textutil.normalise(item.text) == needle:
                 return item
         return None
 
@@ -264,7 +234,7 @@ class MemoryStore:
             cutoff = now - ttl_days * 86400
         else:
             cutoff = 0.0
-        q = _tokens(query)
+        q = textutil.tokenize(query)
         if not q:
             return []
         qset = set(q)
@@ -272,7 +242,7 @@ class MemoryStore:
         for item in self._items:
             if item.created_at < cutoff:
                 continue
-            words = _tokens(item.text)
+            words = textutil.tokenize(item.text)
             hits = sum(1 for w in words if w in qset)
             if hits == 0:
                 continue

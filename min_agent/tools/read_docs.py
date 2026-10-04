@@ -12,10 +12,10 @@ from pathlib import Path
 from typing import Annotated, Any, Callable
 
 from ..errors import ToolError
+from .. import textutil
 from .base import ToolSpec, tool
 
 _MAX_READ_CHARS = 6000
-_TOKEN = re.compile(r"[a-z0-9]+|[一-鿿]")
 
 
 def _scan(docs_dir: Path) -> list[Path]:
@@ -27,7 +27,7 @@ def _scan(docs_dir: Path) -> list[Path]:
 
 
 def _rank(files: list[Path], query: str) -> list[tuple[int, Path, list[str]]]:
-    q = {t.lower() for t in _TOKEN.findall(query) if len(t.strip()) > 1}
+    q = textutil.raw_keywords(query)
     if not q:
         return []
     hits: list[tuple[int, Path, list[str]]] = []
@@ -39,7 +39,7 @@ def _rank(files: list[Path], query: str) -> list[tuple[int, Path, list[str]]]:
         matched = [
             (i, line)
             for i, line in enumerate(lines)
-            if q & {t.lower() for t in _TOKEN.findall(line)}
+            if q & textutil.raw_keywords(line)
         ]
         if matched:
             hits.append((len(matched), path, [f"{i}: {line}" for i, line in matched[:6]]))

@@ -317,6 +317,44 @@ class TestSearch:
         res = reg.call("search", {"query": "agent", "limit": 99})
         assert res["ok"] is True
 
+    def test_package_search_name_is_the_module_not_the_tool(self):
+        """Regression: tools/__init__.py used to re-export the search ToolSpec under
+        the name ``search``, shadowing the submodule, so ``from min_agent.tools
+        import search`` returned a ToolSpec and you could not reach helpers like
+        ``search_corpus`` through it."""
+        from min_agent.tools import search
+
+        assert hasattr(search, "search_corpus")
+        assert hasattr(search, "search")
+
+    def test_results_are_ranked_real_bm25(self):
+        """Regression: the old scorer was overlap/sqrt(len), not BM25, so a
+        short doc with one rare term could outrank a long doc that actually
+        matches more.  BM25 must prefer docs whose terms recur and appear
+        rarely elsewhere."""
+        from min_agent.tools.search import search_corpus
+
+        first = search_corpus("planning module memory module")
+        assert first[0]["title"] == "A Survey on Large Language Model based Autonomous Agents"
+
+    def test_snippet_is_centered_on_the_hit(self):
+        """Regression: the snippet used a *token* index as a *character* index
+        ("1 token == 1 char for our corpus"), so it started far before the hit.
+        The hit's text must fall inside the snippet window."""
+        from min_agent.tools.search import search_corpus
+
+        result = search_corpus("reflexion")[0]
+        assert "Reflexion" in result["snippet"]
+
+    def test_snippet_start_and_end_ellipsis_flags_truncation(self):
+        from min_agent.tools.search import _snippet
+
+        text = ("word " * 200) + "needle" + (" tail " * 200)
+        snippet = _snippet(text, {"needle"})
+        assert snippet.startswith("...")
+        assert snippet.endswith("...")
+        assert "needle" in snippet
+
 
 # --------------------------------------------------------------------------- #
 # todo (per-session state)
