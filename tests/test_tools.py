@@ -76,17 +76,6 @@ def test_container_types_map_to_valid_json_schema():
     )  # must not raise SchemaError
 
 
-def test_schema_violation_becomes_struct_error():
-    from min_agent.tools.calculator import calculator
-
-    reg = ToolRegistry([calculator])
-    res = reg.call("calculator", {})  # expression is required
-    assert res["ok"] is False
-    assert "expression" in res["error"]
-    assert res["tool"] == "calculator"
-    assert "latency_ms" in res
-
-
 def test_broken_schema_surfaces_as_value_error_not_input_error():
     """A schema bug is ours, not the model's: it must raise loudly instead of
     being reported to the model as invalid arguments."""

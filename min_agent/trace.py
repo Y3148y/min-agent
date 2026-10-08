@@ -283,11 +283,19 @@ def _short(value: Any, limit: int = 120) -> str:
 
 
 def read_trace(path: Path) -> list[dict[str, Any]]:
-    """Load a trace file written by :class:`Tracer`."""
+    """Load a trace file written by :class:`Tracer`.
+
+    Tolerates a torn last line: the window may have been killed mid-append, and
+    this reader is how you find out what happened.
+    """
     events: list[dict[str, Any]] = []
     with path.open("r", encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
-            if line:
+            if not line:
+                continue
+            try:
                 events.append(json.loads(line))
+            except json.JSONDecodeError:
+                break  # a half-written line at the end -- stop, don't crash
     return events

@@ -9,7 +9,6 @@ tool carries per-session state.
 from __future__ import annotations
 
 import json
-import re
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -176,7 +175,7 @@ def build_todo_tool(store: TodoStore) -> ToolSpec:
             return f"Added todo #{created.id}: {created.text}\n\nOpen list:\n{store.digest()}"
         if action == "list":
             status_filter = "done" if text_contains.strip().lower() == "done" else None
-            rows: list[dict[str, Any]] = [asdict(i) for i in store.list_items(status_filter)]
+            rows = [asdict(i) for i in store.list_items(status_filter)]
             pending = len(store.list_items("pending"))
             return json.dumps(
                 {"pending": pending, "total": len(store.items), "items": rows},

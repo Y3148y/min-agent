@@ -49,7 +49,7 @@ def _rank(files: list[Path], query: str) -> list[tuple[int, Path, list[str]]]:
 
 def _resolve(docs_dir: Path, name: str) -> Path:
     """Map a user/model-supplied name onto a real file inside docs/."""
-    needle = name.strip().lstrip("./")
+    needle = name.strip().removeprefix("./")
     candidates = [c for c in _scan(docs_dir) if c.name == needle or str(c.relative_to(docs_dir)) == needle]
     if not candidates:
         candidates = [c for c in _scan(docs_dir) if needle.lower() in c.name.lower()]

@@ -123,3 +123,17 @@ def test_lock_serialises_seq_numbers_under_contention(tmp_path):
 
     assert sorted(ev.seq for ev in tr.events) == list(range(1, 101))
     assert len(path.read_text(encoding="utf-8").strip().splitlines()) == 100
+
+
+def test_read_trace_tolerates_a_torn_last_line(tmp_path):
+    """A reader must not crash on a half-written line: the window may have been
+    killed mid-append, and `min-agent trace` is how you find out what happened."""
+    from min_agent.trace import read_trace
+
+    path = tmp_path / "w.jsonl"
+    path.write_text(
+        '{"kind": "user", "text": "hi"}\n{"kind": "final", "text": "hel', encoding="utf-8"
+    )
+    events = read_trace(path)
+    assert len(events) == 1
+    assert events[0]["kind"] == "user"
