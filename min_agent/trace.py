@@ -228,10 +228,13 @@ class Tracer:
         elif ev.kind == "memory_store":
             s.write(f"{BLUE}[mem]{RESET} stored: {d.get('text')}{RESET}\n")
         elif ev.kind == "compact":
-            s.write(
-                f"{YELLOW}[ctx]{RESET} compacted: {d.get('before')} -> {d.get('after')} "
-                f"est tokens (~{d.get('est_tokens')})\n"
-            )
+            if d.get("mechanical"):
+                s.write(f"{YELLOW}[ctx]{RESET} compacted (mechanical): {d.get('note')}\n")
+            else:
+                s.write(
+                    f"{YELLOW}[ctx]{RESET} compacted: {d.get('before')} -> {d.get('after')} "
+                    f"est tokens (~{d.get('est_tokens')})\n"
+                )
         elif ev.kind == "error":
             s.write(f"{RED}[err] {RESET}{d.get('message')}\n")
         elif ev.kind == "warning":

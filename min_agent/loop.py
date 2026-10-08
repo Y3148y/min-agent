@@ -314,6 +314,7 @@ class Agent:
         self.session.append(
             "user",
             "（工具调用次数已达上限。基于已获取的结果直接给出最终答案，不要调用工具。）",
+            count_turn=False,
         )
         try:
             parsed = self._ask([], allow_tools=False, continuation=True)

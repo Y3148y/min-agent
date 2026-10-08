@@ -96,8 +96,12 @@ class Session:
         with path.open("r", encoding="utf-8") as fh:
             for line in fh:
                 line = line.strip()
-                if line:
+                if not line:
+                    continue
+                try:
                     self.messages.append(_json_message(json.loads(line)))
+                except json.JSONDecodeError:
+                    break  # a half-written line at the end -- stop, don't crash
         self.messages = _drop_hanging_tool_refs(self.messages)
 
     def _save_meta(self) -> None:

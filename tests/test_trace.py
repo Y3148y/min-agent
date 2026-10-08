@@ -137,3 +137,14 @@ def test_read_trace_tolerates_a_torn_last_line(tmp_path):
     events = read_trace(path)
     assert len(events) == 1
     assert events[0]["kind"] == "user"
+
+
+def test_mechanical_compact_renders_the_note_not_none():
+    """Regression: the compact renderer printed before/after/est_tokens for
+    every compact event, so a mechanical eviction showed 'None -> None'."""
+    buf = io.StringIO()
+    tracer = Tracer("w", console=True, stream=buf)
+    tracer.emit("compact", mechanical=True, note="evicted oldest complete turns")
+    out = buf.getvalue()
+    assert "evicted oldest complete turns" in out
+    assert "None" not in out

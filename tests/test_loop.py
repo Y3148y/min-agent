@@ -139,6 +139,8 @@ def test_max_turns_forces_wrap_up(agent, llm, cfg):
     assert result.turns == cfg.max_turns
     assert result.turn_budget_exhausted is True
     assert "总结" in result.text
+    # the wrap-up nudge must not inflate turn_count (P0-8 missed this third site)
+    assert agent.session.meta.turn_count == 1
 
 
 def test_repeat_call_guard_aborts(agent, llm):

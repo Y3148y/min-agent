@@ -188,6 +188,27 @@ def test_hanging_tool_use_removes_pair_without_result(cfg):
     assert repaired[0]["role"] == "user"
 
 
+def test_torn_transcript_line_does_not_kill_the_window(cfg):
+    """Regression: _load_transcript ran json.loads unguarded, so a half-written
+    last line (a crash mid-append) made the whole window unopenable -- while the
+    module docstring promised the opposite."""
+    import json as _json
+
+    node = cfg.sessions_root / "alice" / "torn-transcript"
+    node.mkdir(parents=True)
+    (node / "meta.json").write_text(
+        _json.dumps({"id": "torn-transcript", "user": "alice"}), encoding="utf-8"
+    )
+    (node / "transcript.jsonl").write_text(
+        _json.dumps({"role": "user", "content": "first"}) + "\n"
+        + _json.dumps({"role": "assistant", "content": "second"}) + "\n"
+        + '{"role": "user", "content": "half',
+        encoding="utf-8",
+    )
+    s = Session.load(node)
+    assert [m["role"] for m in s.messages] == ["user", "assistant"]
+
+
 def test_dangling_tool_result_is_dropped(cfg):
     s = _session(cfg, "repair2")
     s.append("user", "q")
