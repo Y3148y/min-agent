@@ -9,7 +9,7 @@
 - ✅ 上下文管理：最长轮数上限、重复调用护栏、摘要式压缩
 - ✅ 错误处理：工具失败是数据、LLM 失败重试、分级异常
 - ✅ 运行痕迹：JSONL trace + 控制台渲染
-- ✅ 测试：`pytest` 全离线 178 项 + `pytest -m live` 真实 API 6 项
+- ✅ 测试：`pytest` 全离线 210 项 + `pytest -m live` 真实 API 6 项
 - ✅ 真实 LLM API（DashScope Anthropic 兼容端点）
 
 ## 快速开始
@@ -34,7 +34,7 @@ min-agent --user alice tools              # 列出可用工具
 测试：
 
 ```bash
-pytest tests/ -q               # 178 项离线（零网络）
+pytest tests/ -q               # 210 项离线（零网络）
 pytest -m live -q              # 6 项真实 API（联网，花钱/算力）
 ```
 
@@ -56,7 +56,7 @@ min_agent/
   __main__.py  命令行入口
 ```
 
-### 四步循环（loop.py:113）
+### 四步循环（loop.py:114）
 
 1. **收到输入** → 追加到 session（落盘）
 2. **决定** → 一次 LLM 调用；解析出 `tool_use` 则"行动"，纯文本则"回答"
@@ -105,6 +105,6 @@ min_agent/
 
 ## 目录说明
 
-- `docs/agent-handbook.md` 使用手册、`docs/architecture.md` 系统设计
+- `docs/architecture.md` 系统设计
 - `PROMPT_LOG.md` AI 提示词与问题解决过程记录（含关键探针）
-- `tests/` 178 项离线 + 6 项 live
+- `tests/` 210 项离线 + 6 项 live
