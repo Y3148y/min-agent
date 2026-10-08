@@ -148,3 +148,15 @@ def test_mechanical_compact_renders_the_note_not_none():
     out = buf.getvalue()
     assert "evicted oldest complete turns" in out
     assert "None" not in out
+
+
+def test_trace_path_is_shared_by_writer_and_reader(tmp_path):
+    """The writer (Tracer) and the reader (min-agent trace) must derive the
+    same file name -- otherwise the reader silently finds nothing."""
+    from min_agent.trace import trace_path
+
+    with Tracer("周末规划", traces_root=tmp_path, prefix="张三.", console=False) as tr:
+        writer_path = tr.path
+    reader_path = trace_path("周末规划", traces_root=tmp_path, prefix="张三.")
+    assert writer_path == reader_path
+    assert writer_path.name == "张三.周末规划.jsonl"

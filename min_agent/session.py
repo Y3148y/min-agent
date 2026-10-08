@@ -147,8 +147,10 @@ class Session:
     def set_summary(self, summary: str) -> None:
         self.meta.summary = summary
         summary_path = self.dir / "summary.md"
-        summary_path.write_text(
-            f"# Session {self.meta.id} -- summary\n\n{summary}\n", encoding="utf-8"
+        atomic_write_text(
+            summary_path,
+            f"# Session {self.meta.id} -- summary\n\n{summary}\n",
+            encoding="utf-8",
         )
         self._save_meta()
 

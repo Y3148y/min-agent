@@ -169,13 +169,12 @@ def _cmd_sessions(store, args) -> int:
 
 
 def _cmd_trace(config, args) -> int:
-    from .paths import safe_segment
-    from .trace import read_trace
+    from .trace import read_trace, trace_path
 
-    # The tracer sanitises when it *writes*; the reader must apply the same
-    # rule or a raw id (../.., windows device name) simply fails to find the
-    # file it just created.
-    path = config.traces_root / f"{safe_segment(args.user)}.{safe_segment(args.session)}.jsonl"
+    # The reader must derive the file name exactly as the writer does -- both
+    # go through trace_path, so a rename on one side cannot silently break the
+    # other.
+    path = trace_path(args.session, traces_root=config.traces_root, prefix=f"{args.user}.")
     if not path.exists():
         _print(f"[min-agent] no trace at {path.name} for user {args.user!r} / session {args.session!r}.")
         return 1

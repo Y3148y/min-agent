@@ -209,6 +209,24 @@ def test_torn_transcript_line_does_not_kill_the_window(cfg):
     assert [m["role"] for m in s.messages] == ["user", "assistant"]
 
 
+def test_set_summary_writes_atomically(cfg, monkeypatch):
+    """set_summary used a bare write_text -- the only non-atomic state write in
+    the session.  A crash mid-write left a half-written summary.md."""
+    import min_agent.session as session_module
+
+    calls = []
+    real = session_module.atomic_write_text
+
+    def spy(path, text, **kw):
+        calls.append(path)
+        return real(path, text, **kw)
+
+    monkeypatch.setattr(session_module, "atomic_write_text", spy)
+    s = _session(cfg, "summary-atomic")
+    s.set_summary("hello summary")
+    assert any(p.name == "summary.md" for p in calls)
+
+
 def test_dangling_tool_result_is_dropped(cfg):
     s = _session(cfg, "repair2")
     s.append("user", "q")

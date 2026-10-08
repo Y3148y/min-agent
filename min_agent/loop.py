@@ -20,7 +20,7 @@ from typing import Any
 
 from .config import Config
 from .context import LLMCompactor, build_system_prompt, compact_messages
-from .errors import AgentAborted, LLMContextOverflow, LLMError, LLMTransportError
+from .errors import AgentAborted, LLMContextOverflow, LLMError, LLMTransportError, classify
 from .llm import LLMRequest, LLMResponse, estimate_message_tokens, estimate_tokens
 from .memory import MemoryStore, extract_facts
 from .parser import parse_response
@@ -251,11 +251,18 @@ class Agent:
         if stream is None:
             return self.llm.complete(request)
         response: LLMResponse | None = None
-        for ev in stream(request):
-            if ev.kind == "text":
-                self.trace.stream("text", ev.delta)
-            elif ev.kind == "done":
-                response = ev.response
+        try:
+            for ev in stream(request):
+                if ev.kind == "text":
+                    self.trace.stream("text", ev.delta)
+                elif ev.kind == "done":
+                    response = ev.response
+        except Exception as exc:
+            # A mid-stream failure must be classified, not leaked as a raw SDK
+            # exception: run_turn only catches LLMError, so an unclassified raise
+            # would crash the REPL with a traceback instead of the friendly
+            # "模型请求失败" message.
+            raise classify(exc) from exc
         if response is None:
             raise LLMTransportError("response stream ended without a final message")
         return response

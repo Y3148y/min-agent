@@ -145,6 +145,37 @@ def test_stream_ignored_when_console_off(cfg):
     agent.close()
 
 
+def test_mid_stream_failure_is_classified_not_a_raw_traceback(cfg):
+    """Regression: a network blip mid-stream used to escape as a raw SDK
+    exception (not an LLMError), crashing the REPL with a traceback instead of
+    the friendly failure message."""
+
+    class MidStreamFailureLLM:
+        kind = "fake"
+        last_latency_ms = 0
+
+        def stream(self, request):
+            yield StreamEvent("text", delta="partial")
+            raise ConnectionError("connection reset by peer")
+
+        def complete(self, request):
+            raise AssertionError("stream path should be used")
+
+    from min_agent.loop import Agent
+
+    agent = Agent(
+        config=cfg,
+        user="alice",
+        session_id="w-midfail",
+        llm=MidStreamFailureLLM(),
+        trace=Tracer("w-midfail", console=False),
+    )
+    result = agent.run_turn("hello")
+    assert result.error  # classified into a friendly message, not a raw traceback
+    assert "模型请求失败" in result.text
+    agent.close()
+
+
 @pytest.mark.live
 def test_live_stream_smoke():
     from pathlib import Path

@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from .config import Config
-from .errors import call_with_retry
+from .errors import call_with_retry, classify
 
 
 # --------------------------------------------------------------------------- #
@@ -158,17 +158,24 @@ class AnthropicLLM:
             cap=self.config.retry_max_delay,
         )
         try:
-            for ev in stream:
-                # Dispatch on the event's own `type` field instead of importing
-                # the (private, version-fragile) event classes: parsed events
-                # carry ``type == "text"/"thinking"`` while raw deltas use
-                # ``*_delta`` / ``content_block_*`` -- no collisions.
-                ev_type = getattr(ev, "type", "")
-                if ev_type == "text":
-                    yield StreamEvent("text", delta=getattr(ev, "text", ""))
-                elif ev_type == "thinking":
-                    yield StreamEvent("thinking", delta=getattr(ev, "thinking", ""))
-            final = stream.get_final_message()
+            try:
+                for ev in stream:
+                    # Dispatch on the event's own `type` field instead of importing
+                    # the (private, version-fragile) event classes: parsed events
+                    # carry ``type == "text"/"thinking"`` while raw deltas use
+                    # ``*_delta`` / ``content_block_*`` -- no collisions.
+                    ev_type = getattr(ev, "type", "")
+                    if ev_type == "text":
+                        yield StreamEvent("text", delta=getattr(ev, "text", ""))
+                    elif ev_type == "thinking":
+                        yield StreamEvent("thinking", delta=getattr(ev, "thinking", ""))
+                final = stream.get_final_message()
+            except Exception as exc:
+                # A mid-stream failure must be classified, not leaked as a raw
+                # SDK exception: run_turn only catches LLMError, so an unclassified
+                # raise would crash the REPL with a traceback instead of the
+                # friendly "模型请求失败" message.
+                raise classify(exc) from exc
         finally:
             try:
                 manager.__exit__(None, None, None)

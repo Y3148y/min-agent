@@ -140,16 +140,7 @@ class Tracer:
 
         if traces_root is not None:
             traces_root.mkdir(parents=True, exist_ok=True)
-            # Both halves of the file name are user-controlled, and this used to
-            # interpolate them raw: `--user ../..` produced the path
-            # `.traces/../../.main.jsonl` and happily wrote outside the
-            # workspace, while the session store next to it sanitised all along.
-            # Strip the separator off ``prefix``, sanitise the two halves on
-            # their own, then put the dot back so the on-disk name stays
-            # "<user>.<session>.jsonl" and existing traces keep resolving.
-            stem = safe_segment(prefix.rstrip(".")) if prefix else ""
-            name = f"{stem}.{safe_segment(session_id)}" if stem else safe_segment(session_id)
-            self.path = ensure_within(traces_root, traces_root / f"{name}.jsonl")
+            self.path = trace_path(session_id, traces_root=traces_root, prefix=prefix)
             self._fh = self.path.open("a", encoding="utf-8")
 
     # -- emit ---------------------------------------------------------------
@@ -275,6 +266,19 @@ class Tracer:
             if event.kind == kind:
                 return event
         return None
+
+
+def trace_path(session_id: str, *, traces_root: Path, prefix: str = "") -> Path:
+    """The on-disk path for one session's trace file.
+
+    Single source of truth for the file name: the writer (:class:`Tracer`) and
+    the reader (``min-agent trace``) must agree, so both call this.  Both halves
+    are user-controlled and sanitised here; ``ensure_within`` is the second line
+    of defence against anything that still climbs out.
+    """
+    stem = safe_segment(prefix.rstrip(".")) if prefix else ""
+    name = f"{stem}.{safe_segment(session_id)}" if stem else safe_segment(session_id)
+    return ensure_within(traces_root, traces_root / f"{name}.jsonl")
 
 
 def _short(value: Any, limit: int = 120) -> str:
