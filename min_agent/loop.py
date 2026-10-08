@@ -20,7 +20,7 @@ from typing import Any
 
 from .config import Config
 from .context import LLMCompactor, build_system_prompt, compact_messages
-from .errors import AgentAborted, LLMContextOverflow, LLMError, LLMTransportError, classify
+from .errors import LLMContextOverflow, LLMError, LLMTransportError, classify
 from .llm import LLMRequest, LLMResponse, estimate_message_tokens, estimate_tokens
 from .memory import MemoryStore, extract_facts
 from .parser import parse_response
@@ -179,9 +179,6 @@ class Agent:
             self._repair_last_turn("user")
             result.text = f"模型请求失败，请稍后重试。原因：{exc}"
             result.error = str(exc)
-        except AgentAborted as exc:
-            self._repair_last_turn("user")
-            result.text = str(exc)
         result.turns = steps
         return result
 
@@ -271,8 +268,13 @@ class Agent:
     # Step 3: run tools, feed results back
     # ------------------------------------------------------------------ #
     def _execute_tools(self, calls, recent_calls: list[str]) -> int:
-        def one(call) -> dict[str, Any]:
+        # Record signatures in the main thread, in model order, *before*
+        # dispatch: the repeat guard reads this list, and appending from worker
+        # threads would make its input order nondeterministic.
+        for call in calls:
             recent_calls.append(call.signature())
+
+        def one(call) -> dict[str, Any]:
             outcome = self.registry.call(
                 call.name,
                 call.args,
@@ -304,7 +306,7 @@ class Agent:
                 "is_error": True,
             }
 
-        with ThreadPoolExecutor(max_workers=min(4, len(calls))) as pool:
+        with ThreadPoolExecutor(max_workers=max(1, min(4, len(calls)))) as pool:
             blocks = list(pool.map(one, calls))
         if blocks:
             self.session.append_tool_results(blocks)
@@ -385,6 +387,7 @@ class Agent:
             summary_max=self.config.summary_max_chars,
             compactor=self.compactor,
             system_overhead=system_tokens,
+            tools=compiled.tools,
             trace=self.trace,
         )
         return True

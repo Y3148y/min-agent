@@ -201,6 +201,27 @@ def test_direct_eviction_keeps_tool_pairs_together():
     assert len(messages) < len(saved)
 
 
+def test_mechanical_eviction_drops_the_mirror_pair():
+    """A tool_results whose tool_use sits just above it must be dropped together
+    -- otherwise the eviction leaves an orphaned tool_use that the provider
+    rejects."""
+    messages = [
+        {"role": "user", "content": "q"},
+        {
+            "role": "assistant",
+            "content": [{"type": "tool_use", "id": "t1", "name": "calculator", "input": {"expression": "1+1"}}],
+        },
+        {
+            "role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "2"}],
+        },
+    ]
+    changed = _mechanical_eviction(messages, budget=1, overhead=100)
+    assert changed is True
+    assert len(messages) == 1
+    assert messages[0]["role"] == "user"
+
+
 def test_mechanical_eviction_note_reaches_the_trace(tmp_path):
     """Regression: _persist_compacted took a ``note`` it never used, so a
     mechanical eviction was invisible in the trace.  The note must surface as a

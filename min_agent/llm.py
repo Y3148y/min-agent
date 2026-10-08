@@ -12,6 +12,7 @@ the loop ever touches SDK objects.
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from collections.abc import Iterator
@@ -266,8 +267,6 @@ def estimate_message_tokens(messages: list[dict[str, Any]], tools: list[dict[str
 
 
 def _json(value: Any) -> str:
-    import json
-
     if isinstance(value, str):
         return value
     try:

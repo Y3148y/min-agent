@@ -492,3 +492,46 @@ def reg():
     from min_agent.tools.weather import weather
 
     return ToolRegistry([calculator, search, weather])
+
+
+# --------------------------------------------------------------------------- #
+# schema: Union and Literal
+# --------------------------------------------------------------------------- #
+
+
+def test_union_type_maps_to_any_of():
+    """PEP 604 (X | Y) and typing.Union both used to collapse to {"type":"string"},
+    silently lying to the model about what the tool accepts."""
+    from typing import Union
+
+    from min_agent.tools.base import _schema_for
+
+    assert _schema_for(Union[str, int]) == {"anyOf": [{"type": "string"}, {"type": "integer"}]}
+    assert _schema_for(int | str) == {"anyOf": [{"type": "integer"}, {"type": "string"}]}
+
+
+def test_optional_unwraps_to_inner_type():
+    from min_agent.tools.base import _schema_for
+
+    assert _schema_for(Optional[str]) == {"type": "string"}
+
+
+def test_literal_maps_to_enum():
+    from typing import Literal
+
+    from min_agent.tools.base import _schema_for
+
+    assert _schema_for(Literal["a", "b"]) == {"enum": ["a", "b"]}
+
+
+def test_validation_hint_lists_field_names_not_the_whole_schema():
+    """The hint used to dump the entire input_schema dict (Python repr, single
+    quotes) into the model's error -- unreadable and unactionable."""
+    from min_agent.tools.calculator import calculator
+
+    reg = ToolRegistry([calculator])
+    res = reg.call("calculator", {})
+    assert res["ok"] is False
+    assert "expression" in res["error"]
+    assert "Required argument" in res["error"]
+    assert "input_schema" not in res["error"]

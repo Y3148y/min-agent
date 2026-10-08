@@ -102,9 +102,10 @@ class ToolRegistry:
             raise ValueError(f"invalid JSON schema for {name!r}: {exc}") from exc
         except jsonschema.ValidationError as exc:
             expected = spec.required_args()
-            hint = f"{spec.name} expects {spec.input_schema}."
-            if expected and "required" in str(exc):
-                hint += f" Required argument(s): {', '.join(expected)}."
+            if expected:
+                hint = f"Required argument(s): {', '.join(expected)}."
+            else:
+                hint = "This tool takes no arguments."
             raise ToolInputError(
                 f"Invalid arguments for {name!r}: {_describe_validation_error(exc)}", hint=hint
             ) from exc

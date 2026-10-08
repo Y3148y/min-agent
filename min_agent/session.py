@@ -132,18 +132,6 @@ class Session:
         self.meta.updated_at = time.time()
         self._save_meta()
 
-    def rollback_turn(self, assistant_turn: dict[str, Any]) -> None:
-        """Undo the last two messages (assistant + tool results) after a fatal LLM error.
-
-        Keeps the transcript a valid alternating user/assistant sequence even
-        when a user turn dies midway -- otherwise the next retry would send
-        [user, assistant, user] which some endpoints reject.
-        """
-        if len(self.messages) >= 2:
-            self.messages = self.messages[:-2]
-        # Rebuild the file from scratch; transcript files are small by design.
-        self._rewrite_jsonl()
-
     def set_summary(self, summary: str) -> None:
         self.meta.summary = summary
         summary_path = self.dir / "summary.md"

@@ -79,10 +79,6 @@ class LLMBadRequestError(LLMError):
     """The provider rejected the request shape. Retrying will not help."""
 
 
-class AgentAborted(AgentError):
-    """The loop was stopped on purpose (guard rail, Ctrl-C, token limit)."""
-
-
 # --------------------------------------------------------------------------- #
 # Retry
 # --------------------------------------------------------------------------- #

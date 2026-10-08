@@ -172,19 +172,6 @@ def weather(
     return _fmt(_mock_row(city, day))
 
 
-def forecast_range(city: str, start: Date, days: int) -> str:
-    """Multi-day view; used by the tests and by the loop's todo reminders."""
-    rows = []
-    for i in range(days):
-        day = start + timedelta(days=i)
-        f = _forecast(city, day)
-        rows.append(
-            f"{f['date']}  {f['temp_low_c']:>5}C ~ {f['temp_high_c']:<5}C  "
-            f"{f['condition']:<13} humidity {f['humidity_pct']:>3}%  wind {f['wind_kph']:>4} kph"
-        )
-    return "\n".join(rows)
-
-
 def _fmt(f: dict[str, object]) -> str:
     return (
         f"Weather for {f['city']} on {f['date']} (source: {f['source']}):\n"

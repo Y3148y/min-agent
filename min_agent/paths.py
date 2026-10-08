@@ -246,7 +246,8 @@ class FileLock:
     # -- internals ----------------------------------------------------------
     def _stamp_owner(self) -> None:
         """Record who holds it, so the loser's error message can say who won."""
-        assert self._fh is not None
+        if self._fh is None:
+            raise RuntimeError(f"lock not held: {self.path}")
         old = self._fh.tell()
         # Fixed record width, so the next takeover overwrites it in place and
         # the file never grows; _busy_message reads it back without locking.

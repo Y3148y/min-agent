@@ -133,6 +133,7 @@ def compact_messages(
     summary_max: int,
     compactor: Compactor | None,
     system_overhead: int,
+    tools: list[dict] | None = None,
     trace=None,
 ) -> bool:
     """Compress ``session.messages`` in place if it exceeds ``budget``.
@@ -140,7 +141,7 @@ def compact_messages(
     Returns True if compaction ran.  Never raises: any failure degrades to a
     mechanical eviction of the oldest complete turns.
     """
-    total = system_overhead + estimate_message_tokens(session.messages)
+    total = system_overhead + estimate_message_tokens(session.messages, tools)
     if total <= budget:
         return False
 
@@ -289,6 +290,15 @@ def _mechanical_eviction(messages: list[dict], budget: int, overhead: int) -> bo
             and _is_tool_results_message(messages[idx + 1])
         ):
             del messages[idx : idx + 2]  # tool_use and its results move together
+            dropped_any = True
+            continue
+        if (
+            _is_tool_results_message(first)
+            and idx >= 1
+            and messages[idx - 1]["role"] == "assistant"
+        ):
+            # the mirror case: a tool_results whose tool_use sits just above
+            del messages[idx - 1 : idx + 1]
             dropped_any = True
             continue
         del messages[idx]

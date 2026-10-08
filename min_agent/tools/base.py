@@ -9,6 +9,8 @@ loop.
 from __future__ import annotations
 
 import inspect
+import types
+import typing
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -120,14 +122,16 @@ def _schema_for(python_type: Any) -> dict[str, Any]:
     because the old code emitted the string ``"array[string]"``, which the
     json-schema validator refuses to compile.  ``dict[str, X]`` also carries
     ``additionalProperties``.  ``Annotated`` and ``Optional`` are unwrapped.
+    ``Union`` (including PEP 604 ``X | Y``) becomes ``anyOf``; ``Literal``
+    becomes ``enum``.
     """
     if typing_is_annotated(python_type):
         args = [a for a in getattr(python_type, "__args__", ()) if a is not type(None)]
         return _schema_for(args[0]) if args else {"type": "string"}
 
-    origin = getattr(python_type, "__origin__", None)
+    origin = typing.get_origin(python_type)
     if origin is not None:
-        args = [a for a in getattr(python_type, "__args__", ()) if a is not type(None)]
+        args = [a for a in typing.get_args(python_type) if a is not type(None)]
         if origin in (list, tuple, set):
             item = _schema_for(args[0]) if args and args[0] is not Any else {"type": "string"}
             return {"type": "array", "items": item}
@@ -136,6 +140,12 @@ def _schema_for(python_type: Any) -> dict[str, Any]:
             if value is not None:
                 return {"type": "object", "additionalProperties": _schema_for(value)}
             return {"type": "object"}
+        if origin is typing.Union or origin is types.UnionType:
+            if len(args) == 1:
+                return _schema_for(args[0])  # Optional[X] unwraps to X
+            return {"anyOf": [_schema_for(a) for a in args]} if args else {"type": "string"}
+        if origin is typing.Literal:
+            return {"enum": list(args)} if args else {"type": "string"}
         if args:
             return _schema_for(args[0])
         return {"type": "string"}
